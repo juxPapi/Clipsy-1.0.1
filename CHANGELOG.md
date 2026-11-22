@@ -5,6 +5,7 @@ All notable changes to **Clipsy** are documented in this file.
 ## [Unreleased]
 
 ### Added
+- **Export Progress Overlay (`ExportProgressOverlay`)**: Added a dedicated modal progress overlay (`0–100%`) in `EditorPage` when initiating a `1080p60`, `720p60`, or `720p30` download, showing preset metadata, live progress bar (`computeExportProgressStage`), 4-stage pipeline status (`Probing source streams`, `9:16 Gameplay & Facecam reframe`, `H.264 encode`, `Audio, captions & faststart MP4`), rendered MP4 size, error recovery, and instant `Download MP4` CTA upon completion.
 - **`README.md` & `CHANGELOG.md`**: Documented prerequisites (`Node.js >= 22`, `FFmpeg`, `FFprobe`, `yt-dlp`), environment variables (`GEMINI_API_KEY`, `APP_URL`, `NODE_ENV`, `DISABLE_HMR`), run/build/test commands, API endpoints, and Chrome extension setup.
 
 ## [0.4.0] - 2026-11-22

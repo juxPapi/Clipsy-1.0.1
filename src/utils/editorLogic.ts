@@ -651,3 +651,79 @@ export function computeSnippetPreviewProgress(
   };
 }
 
+export interface ExportProgressState {
+  percent: number;
+  stageLabel: string;
+  stepIndex: 0 | 1 | 2 | 3 | 4;
+}
+
+/**
+ * Computes simulated-yet-deterministic 0–100% FFmpeg export progress and pipeline stage
+ * from elapsed render time and export preset, snapping to 100% when complete.
+ */
+export function computeExportProgressStage(
+  elapsedMs: number,
+  preset: ExportPreset | undefined,
+  isComplete: boolean,
+  durationSec?: number
+): ExportProgressState {
+  const spec = resolveExportSpec(preset);
+  if (isComplete) {
+    return {
+      percent: 100,
+      stageLabel: 'Export ready to download',
+      stepIndex: 4,
+    };
+  }
+
+  const safeElapsed = Math.max(0, elapsedMs);
+  const baseTauMs =
+    spec.preset === '1080p60' ? 2800 : spec.preset === '720p60' ? 1900 : 1500;
+  const durationMultiplier =
+    typeof durationSec === 'number' && Number.isFinite(durationSec) && durationSec > 12
+      ? Math.min(4.5, durationSec / 12)
+      : 1;
+  const tauMs = Math.round(baseTauMs * durationMultiplier);
+  const rawPercent = Math.round(95 * (1 - Math.exp(-safeElapsed / tauMs)));
+  const percent = safeElapsed === 0 ? 0 : Math.max(4, Math.min(94, rawPercent));
+
+  if (percent < 20) {
+    return {
+      percent,
+      stageLabel: 'Probing source streams',
+      stepIndex: 0,
+    };
+  }
+  if (percent < 55) {
+    return {
+      percent,
+      stageLabel: 'Reframing 9:16 Gameplay & Facecam',
+      stepIndex: 1,
+    };
+  }
+  if (percent < 85) {
+    return {
+      percent,
+      stageLabel: `Encoding ${spec.width}×${spec.height} @ ${spec.fps}fps (H.264)`,
+      stepIndex: 2,
+    };
+  }
+  return {
+    percent,
+    stageLabel: 'Muxing audio, captions & faststart MP4',
+    stepIndex: 3,
+  };
+}
+
+/**
+ * Formats rendered MP4 byte counts into human-readable KB / MB labels.
+ */
+export function formatExportFileSize(bytes?: number | null): string {
+  if (typeof bytes !== 'number' || !Number.isFinite(bytes) || bytes <= 0) {
+    return 'Ready';
+  }
+  if (bytes < 1024 * 1024) {
+    return `${Math.max(1, Math.round(bytes / 1024))} KB`;
+  }
+  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+}

@@ -4,9 +4,11 @@ import {
   clampCropRect,
   clampMomentRange,
   computeChatSpikeScore,
+  computeExportProgressStage,
   computeLayoutGeometry,
   computeSnippetPreviewProgress,
   deleteSegmentById,
+  formatExportFileSize,
   formatPreciseTimecode,
   formatTimecode,
   getAccentPalette,
@@ -170,3 +172,29 @@ test('resolveSnippetForProject and computeSnippetPreviewProgress resolve active 
   assert.equal(progEnd.progressPct, 100);
 });
 
+test('computeExportProgressStage advances monotonically 0->94% per preset and snaps to 100% on complete', () => {
+  const start = computeExportProgressStage(0, '1080p60', false);
+  assert.equal(start.percent, 0);
+  assert.equal(start.stepIndex, 0);
+
+  const p1080Early = computeExportProgressStage(400, '1080p60', false);
+  const p720Early = computeExportProgressStage(400, '720p60', false);
+  assert.ok(p1080Early.percent >= 4 && p1080Early.percent < p720Early.percent);
+
+  const pMid = computeExportProgressStage(3500, '1080p60', false);
+  assert.ok(pMid.percent >= 55 && pMid.percent < 85);
+  assert.equal(pMid.stepIndex, 2);
+  assert.ok(pMid.stageLabel.includes('1080×1920 @ 60fps'));
+
+  const pCeiling = computeExportProgressStage(120000, '1080p60', false);
+  assert.equal(pCeiling.percent, 94);
+  assert.equal(pCeiling.stepIndex, 3);
+
+  const done = computeExportProgressStage(1200, '720p60', true);
+  assert.equal(done.percent, 100);
+  assert.equal(done.stepIndex, 4);
+
+  assert.equal(formatExportFileSize(512 * 1024), '512 KB');
+  assert.equal(formatExportFileSize(2.5 * 1024 * 1024), '2.5 MB');
+  assert.equal(formatExportFileSize(null), 'Ready');
+});

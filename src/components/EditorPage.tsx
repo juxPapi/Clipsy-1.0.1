@@ -33,6 +33,7 @@ import {
 import { ClipsyLogo } from './Navbar';
 import type { AppRoute } from './Navbar';
 import { ThemeControl } from './ThemeControl';
+import { ExportProgressOverlay } from './editor/ExportProgressOverlay';
 import { FinalShortStage } from './editor/FinalShortStage';
 import { MomentRangeSlider } from './editor/MomentRangeSlider';
 import { SourceFramingStage } from './editor/SourceFramingStage';
@@ -78,9 +79,29 @@ export const EditorPage: React.FC<EditorPageProps> = ({
   const [isUploading, setIsUploading] = useState(false);
   const [isGeneratingCaptions, setIsGeneratingCaptions] = useState(false);
   const [isExporting, setIsExporting] = useState(false);
+  const [exportOverlayOpen, setExportOverlayOpen] = useState(false);
+  const [exportElapsedMs, setExportElapsedMs] = useState(0);
   const [exportDownloadUrl, setExportDownloadUrl] = useState<string | null>(null);
+  const [exportFileName, setExportFileName] = useState<string | null>(null);
+  const [exportSizeBytes, setExportSizeBytes] = useState<number | null>(null);
   const [exportedLabel, setExportedLabel] = useState<string>('1080p60');
   const [exportError, setExportError] = useState<string | null>(null);
+  const exportTimerRef = useRef<number | null>(null);
+
+  const stopExportTimer = () => {
+    if (exportTimerRef.current !== null) {
+      window.clearInterval(exportTimerRef.current);
+      exportTimerRef.current = null;
+    }
+  };
+
+  useEffect(() => {
+    return () => {
+      if (exportTimerRef.current !== null) {
+        window.clearInterval(exportTimerRef.current);
+      }
+    };
+  }, []);
 
   const accentPalette = getAccentPalette(accent);
   const exportSpec = resolveExportSpec(exportPreset);
@@ -248,9 +269,20 @@ export const EditorPage: React.FC<EditorPageProps> = ({
   };
 
   const handleExportShort = async () => {
+    stopExportTimer();
     setIsExporting(true);
+    setExportOverlayOpen(true);
+    setExportElapsedMs(0);
     setExportError(null);
     setExportDownloadUrl(null);
+    setExportFileName(null);
+    setExportSizeBytes(null);
+
+    const startedAt = Date.now();
+    exportTimerRef.current = window.setInterval(() => {
+      setExportElapsedMs(Date.now() - startedAt);
+    }, 80);
+
     try {
       const res = await fetch('/api/export', {
         method: 'POST',
@@ -273,12 +305,15 @@ export const EditorPage: React.FC<EditorPageProps> = ({
         setExportError(data.error || 'Export failed.');
       } else if (data.downloadUrl) {
         setExportDownloadUrl(data.downloadUrl);
+        setExportFileName(data.fileName || `Clipsy-short-${exportPreset}.mp4`);
+        setExportSizeBytes(typeof data.sizeBytes === 'number' ? data.sizeBytes : null);
         setExportedLabel(`${exportSpec.label} (${exportSpec.width}×${exportSpec.height} · ${exportSpec.fps}fps)`);
         mutateProject({ status: 'exported' });
       }
     } catch {
       setExportError('Export request failed.');
     } finally {
+      stopExportTimer();
       setIsExporting(false);
     }
   };
@@ -492,8 +527,8 @@ export const EditorPage: React.FC<EditorPageProps> = ({
         </div>
       </header>
 
-      {/* Export / Status Banner if active */}
-      {(exportDownloadUrl || exportError) && (
+      {/* Export / Status Banner if overlay was dismissed in background */}
+      {!exportOverlayOpen && (exportDownloadUrl || exportError) && (
         <div
           className={`flex items-center justify-between border-b px-4 py-2 text-xs ${
             exportError
@@ -691,6 +726,19 @@ export const EditorPage: React.FC<EditorPageProps> = ({
         onAddOverlay={handleAddOverlay}
         onSplitAtPlayhead={handleSplit}
         onDeleteSelectedSegment={handleDeleteSegment}
+      />
+
+      <ExportProgressOverlay
+        isOpen={exportOverlayOpen}
+        exportPreset={exportPreset}
+        isExporting={isExporting}
+        elapsedMs={exportElapsedMs}
+        durationSec={getTimelineTotalDuration(project.segments)}
+        downloadUrl={exportDownloadUrl}
+        fileName={exportFileName}
+        sizeBytes={exportSizeBytes}
+        error={exportError}
+        onClose={() => setExportOverlayOpen(false)}
       />
     </div>
   );

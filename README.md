@@ -15,7 +15,7 @@
   - `Fullscreen` (full 9:16 gameplay)
 - **Visual Viral Moment Range Slider (`Clip Window`)**: Dual-thumb precision `IN` / `OUT` slider (`0.1s` resolution), draggable window shift, `-0.5s / +0.5s` nudge buttons, and keyboard arrow controls synced live to the video player, `AI CLIPS` drawer, timeline segments, and FFmpeg export.
 - **Timeline, Captions, Audio & Effects**: Frame-accurate timeline scrubbing, segment splitting/deletion, AI caption generation with `Highlight` / `Clean Box` / `Stroke` styles, synthesized SFX & music beds, and impact effects (`Punch Zoom`, `Screen Shake`, `Impact Flash`, `Cinema Vignette`).
-- **Real FFmpeg H.264 MP4 Export**: Server-side 9:16 rendering at **`1080p60` (`1080×1920 @ 60fps`)**, **`720p60` (`720×1280 @ 60fps`)**, and **`720p30` (`720×1280 @ 30fps`)** with burned-in text overlays, captions, and audio mixing.
+- **Real FFmpeg H.264 MP4 Export & Live Progress Overlay**: Server-side 9:16 rendering at **`1080p60` (`1080×1920 @ 60fps`)**, **`720p60` (`720×1280 @ 60fps`)**, and **`720p30` (`720×1280 @ 30fps`)** with burned-in text overlays, captions, audio mixing, and an interactive `0–100%` `ExportProgressOverlay` tracking probing, reframing, H.264 encoding, MP4 muxing, file size, and instant download.
 - **Dark / Light Skins & 5 Accent Palettes**: Switch between Dark and Light modes and 5 accent themes (`Volt Green`, `Electric Blue`, `Solar Amber`, `Crimson Pulse`, `Violet Spark`) persisted in `localStorage`.
 - **Live Clipping Chrome Extension (Manifest V3)**: Monitors live chat velocity on Twitch, Kick, and YouTube to detect spikes (`>= 2.2x` rolling baseline) and post captured moments straight to `/api/extension/capture`.
 
@@ -80,7 +80,7 @@ NODE_ENV=production npm start
 # TypeScript strict check
 npm run lint
 
-# Pure editor logic unit tests (URL validation, crop clamping, layouts, timeline, export specs, range slider, snippet resolution)
+# Pure editor logic unit tests (URL validation, crop clamping, layouts, timeline, export specs & progress, range slider, snippet resolution)
 npx tsx --test src/utils/editorLogic.test.ts
 ```
 
@@ -102,8 +102,8 @@ npx tsx --test src/utils/editorLogic.test.ts
 │   │   ├── EditorPage.tsx          # Main 9:16 studio workspace
 │   │   ├── LiveClippingPage.tsx    # Interactive chat-spike simulator + Chrome extension setup & bundle download
 │   │   ├── ThemeControl.tsx        # Dark/Light skin & 5-accent palette popover
-│   │   └── editor/                 # SourceFramingStage, FinalShortStage, MomentRangeSlider, ToolsSidebar, TimelineDock
-│   ├── utils/editorLogic.ts        # Pure geometry, URL validation, timeline, export preset & moment range helpers
+│   │   └── editor/                 # SourceFramingStage, FinalShortStage, MomentRangeSlider, ExportProgressOverlay, ToolsSidebar, TimelineDock
+│   ├── utils/editorLogic.ts        # Pure geometry, URL validation, timeline, export preset/progress & moment range helpers
 │   └── types/clipfast.ts           # Shared TypeScript interfaces
 ├── extension/                      # Unpacked Manifest V3 Chrome Extension (manifest.json, content.js, popup.html, popup.js)
 ├── public/assets/demo/             # Built-in 1920x1080 demo gameplay + facecam MP4 stream

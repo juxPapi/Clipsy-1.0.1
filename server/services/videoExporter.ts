@@ -228,7 +228,7 @@ export async function exportVerticalShortMp4(
     outputPath
   );
 
-  await execFileAsync('ffmpeg', args, { timeout: 60000, maxBuffer: 4 * 1024 * 1024 });
+  await execFileAsync('ffmpeg', args, { timeout: 90000, maxBuffer: 4 * 1024 * 1024 });
 
   return {
     outputPath,
