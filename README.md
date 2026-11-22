@@ -26,8 +26,8 @@
 | Requirement | Purpose | Notes |
 | --- | --- | --- |
 | **Node.js `>= 22`** | Runtime & Express + Vite server | Verified on `v22.23.2` |
-| **FFmpeg & FFprobe** | Video probing (`ffprobe`), audio spike detection (`astats`), and 9:16 H.264 export (`ffmpeg`) | Must be installed at `/usr/bin/ffmpeg` and `/usr/bin/ffprobe` (or on `PATH`) |
-| **yt-dlp** *(optional but recommended)* | Stream/VOD metadata & heatmap extraction | Looked up in `~/.local/bin/yt-dlp`, `/usr/local/bin/yt-dlp`, `/usr/bin/yt-dlp` |
+| **FFmpeg & FFprobe** | Video probing (`ffprobe`), audio spike detection (`astats`), and 9:16 H.264 export (`ffmpeg`) | Resolved on `PATH` (Winget, Homebrew, `/usr/bin/...`); verified by `/api/health` |
+| **yt-dlp** *(required for stream links)* | Stream/VOD metadata, heatmaps, and **real playable media** | Resolved on `PATH` or in `~/.local/bin`, `/usr/local/bin`, `/usr/bin`; without it, upload a local video instead |
 | **Gemini API Key** | AI viral moment scoring & auto-generated captions | Uses `@google/genai` server-side only |
 
 > **Note on YouTube bot checks in cloud environments**: When running on cloud/datacenter IPs where YouTube blocks `yt-dlp` with `"Sign in to confirm you're not a bot"`, Clipsy automatically falls back to YouTube's public oEmbed endpoint for real stream title, channel name, and thumbnail metadata. No bundled demo footage is ever substituted: if playable stream media cannot be retrieved, the project is created without a preview and you can upload a local recording in the editor. Uploading an `.mp4`/`.webm` file directly always processes your exact footage end-to-end.
@@ -80,9 +80,22 @@ NODE_ENV=production npm start
 # TypeScript strict check
 npm run lint
 
-# Pure editor logic unit tests (URL validation, crop clamping, layouts, timeline, export specs & progress, range slider, snippet resolution)
+# Pure editor logic unit tests (URL validation, crop clamping, layouts, timeline,
+# export specs & progress, range slider, snippet resolution, 5-8 clip normalization)
 npx tsx --test src/utils/editorLogic.test.ts
 ```
+
+### 5. Verify with a real stream (optional smoke test)
+
+```bash
+# 1. Paste a short public stream/VOD link in the Library and click "Scan viral moments".
+#    Expect: real media downloaded to uploads/, five viral moment cards, playable preview.
+# 2. Open a moment in the editor and exercise layout, text, captions, audio, effects,
+#    AI CLIPS, clip-window slider, split/delete, and play/pause.
+# 3. Click "EXPORT SHORT" and download the rendered 9:16 MP4.
+```
+
+No demo footage is bundled: if media cannot be fetched, the editor shows a no-source state and the **UPLOAD VIDEO** button loads your own recording.
 
 ---
 
@@ -91,7 +104,7 @@ npx tsx --test src/utils/editorLogic.test.ts
 ```text
 ├── server.ts                       # Express server (port 3000), Vite middleware / dist static serving, API routes
 ├── server/services/
-│   ├── streamAnalyzer.ts           # ffprobe, FFmpeg audio peak detection, yt-dlp, YouTube oEmbed fallback, Gemini AI
+│   ├── streamAnalyzer.ts           # Real stream media resolution (yt-dlp -g/download), ffprobe, FFmpeg audio peaks, oEmbed fallback, Gemini AI, 5-8 clip normalization, caption fallback
 │   └── videoExporter.ts            # FFmpeg 9:16 H.264 MP4 renderer (1080p60 / 720p60 / 720p30)
 ├── src/
 │   ├── App.tsx                     # SPA routing (/home, /edit/library, /live-clipping, /edit/:id) + persisted theme/accent state
@@ -103,21 +116,21 @@ npx tsx --test src/utils/editorLogic.test.ts
 │   │   ├── LiveClippingPage.tsx    # Interactive chat-spike simulator + Chrome extension setup & bundle download
 │   │   ├── ThemeControl.tsx        # Dark/Light skin & 5-accent palette popover
 │   │   └── editor/                 # SourceFramingStage, FinalShortStage, MomentRangeSlider, ExportProgressOverlay, ToolsSidebar, TimelineDock
-│   ├── utils/editorLogic.ts        # Pure geometry, URL validation, timeline, export preset/progress & moment range helpers
+│   ├── utils/editorLogic.ts        # Pure geometry, URL validation, timeline, export preset/progress, moment range & 5-8 clip normalization helpers
 │   └── types/clipfast.ts           # Shared TypeScript interfaces
 ├── extension/                      # Unpacked Manifest V3 Chrome Extension (manifest.json, content.js, popup.html, popup.js)
 ├── public/assets/                  # Static marketing images only (no preloaded demo video)
-└── data/                           # Local persisted library JSON (auto-seeded on first boot)
+└── data/                           # Local persisted library JSON (created empty on first boot; no demo projects)
 ```
 
 ### Backend Endpoints
 
 - `GET /api/health` — Reports availability of `ffmpeg`, `ffprobe`, `ytDlp`, and `gemini`.
 - `GET /api/library` · `POST /api/library` · `DELETE /api/library/:id` — Read, upsert, and remove clip projects (`data/library.json`).
-- `POST /api/streams/analyze` — Validates YouTube/Kick/Twitch URL, extracts metadata (`yt-dlp` / YouTube oEmbed), scores viral moments with FFmpeg + Gemini, and saves a project.
-- `POST /api/upload` — Accepts multipart video (`video` field, up to 250 MB), runs `ffprobe` + FFmpeg audio spike detection + Gemini scan.
-- `POST /api/captions/generate` — Generates timed short-form caption segments via Gemini.
-- `POST /api/export` — Renders a 9:16 H.264 MP4 (`1080p60`, `720p60`, or `720p30`) to `/exports/<file>.mp4`.
+- `POST /api/streams/analyze` — Validates YouTube/Kick/Twitch URL, extracts metadata (`yt-dlp` / YouTube oEmbed), **downloads the real playable media** (or returns a direct CDN URL), scores **5–8** viral moments with FFmpeg + Gemini (with a deterministic fallback), and saves a project. No demo video is attached.
+- `POST /api/upload` — Accepts multipart video (`video` field, up to 250 MB), runs `ffprobe` + FFmpeg audio spike detection + Gemini scan (also normalized to 5–8 moments).
+- `POST /api/captions/generate` — Generates timed short-form caption segments via Gemini, with five deterministic local captions when no API key is configured.
+- `POST /api/export` — Renders a 9:16 H.264 MP4 (`1080p60`, `720p60`, or `720p30`) from the local upload/download or a validated remote media URL to `/exports/<file>.mp4`.
 - `GET /api/extension/files` · `GET /api/extension/download` · `POST /api/extension/capture` — Inspects/downloads the Manifest V3 extension (`clipsy-chrome-extension.tar.gz`) and receives live chat-spike captures.
 
 ---
@@ -129,3 +142,9 @@ npx tsx --test src/utils/editorLogic.test.ts
 3. Open `chrome://extensions`, enable **Developer mode**, click **Load unpacked**, and select the extracted folder (or `/extension`).
 4. Navigate to any live **Twitch**, **Kick**, or **YouTube** stream with live chat visible, open the **Clipsy Live Clipper** popup, and click **Start auto clipping**.
 5. Whenever live chat velocity spikes (`>= 2.2x` baseline), `content.js` sends a `POST /api/extension/capture` payload to `http://localhost:3000` (update `currentAppUrl` in `extension/popup.js` if pointing to a deployed `APP_URL`).
+
+---
+
+## Changelog
+
+See [`CHANGELOG.md`](./CHANGELOG.md) for the full release history, including the `0.5.0` real-stream-media / 5–8 clip update.
