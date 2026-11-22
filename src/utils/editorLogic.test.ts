@@ -14,6 +14,9 @@ import {
   getAccentPalette,
   getTimelineTotalDuration,
   mapTimelineToSourceTime,
+  MAX_GENERATED_CLIPS,
+  MIN_GENERATED_CLIPS,
+  normalizeViralMoments,
   parseStreamUrl,
   resolveExportSpec,
   resolveSnippetForProject,
@@ -170,6 +173,55 @@ test('resolveSnippetForProject and computeSnippetPreviewProgress resolve active 
   const progEnd = computeSnippetPreviewProgress(34.0, 27, 34);
   assert.equal(progEnd.isFinished, true);
   assert.equal(progEnd.progressPct, 100);
+});
+
+test('normalizeViralMoments produces 5-8 clips from stream detections', () => {
+  const makeMoment = (idx: number, score: number, startSec: number, endSec: number) => ({
+    id: `vm-${idx}`,
+    title: `Moment ${idx}`,
+    startSec,
+    endSec,
+    score,
+    category: 'clutch' as const,
+    reason: 'Test moment',
+    hookText: 'WATCH',
+    peakMetric: '+10 dB',
+  });
+
+  // Only three real candidates still yield the five-clip minimum.
+  const few = normalizeViralMoments(
+    [makeMoment(1, 96, 10, 18), makeMoment(2, 91, 25, 33), makeMoment(3, 88, 40, 48)],
+    120
+  );
+  assert.equal(few.length, MIN_GENERATED_CLIPS);
+  assert.equal(new Set(few.map((m) => m.id)).size, MIN_GENERATED_CLIPS);
+  for (const m of few) {
+    assert.ok(m.startSec >= 0 && m.endSec <= 120);
+    assert.ok(m.endSec > m.startSec);
+  }
+
+  // Many candidates are capped at eight, highest scoring first.
+  const many = Array.from({ length: 14 }, (_, i) => makeMoment(i + 1, 90 - i, i * 8, i * 8 + 9));
+  const capped = normalizeViralMoments(many, 180);
+  assert.equal(capped.length, MAX_GENERATED_CLIPS);
+  assert.equal(capped[0].id, 'vm-1');
+  assert.ok(
+    capped.every((m, i) => i === 0 || capped[i - 1].score >= m.score),
+    'moments remain sorted by score'
+  );
+
+  // Short streams still reach five clips even when one candidate covers the
+  // whole source (staggered, non-duplicate windows are used as a last resort).
+  const shortStream = normalizeViralMoments([makeMoment(1, 90, 0, 19)], 19);
+  assert.equal(shortStream.length, MIN_GENERATED_CLIPS);
+  assert.equal(new Set(shortStream.map((m) => m.startSec)).size, MIN_GENERATED_CLIPS);
+
+  // Signal peaks are used as seeds before synthetic timeline windows.
+  const seeded = normalizeViralMoments([makeMoment(1, 90, 5, 12)], 90, [
+    { startSec: 30, endSec: 38, peakMetric: '+14 dB audio peak' },
+  ]);
+  assert.equal(seeded.length, MIN_GENERATED_CLIPS);
+  assert.ok(seeded.some((m) => m.peakMetric.includes('+14 dB')));
 });
 
 test('computeExportProgressStage advances monotonically 0->94% per preset and snaps to 100% on complete', () => {

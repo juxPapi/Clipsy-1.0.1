@@ -166,10 +166,10 @@ export const HomePage: React.FC<HomePageProps> = ({ onNavigate, onAnalyzeStreamU
             <div className="mt-8 flex flex-wrap items-center justify-center gap-5">
               <button
                 type="button"
-                onClick={() => onNavigate('editor', 'demo-clipsy')}
+                onClick={() => onNavigate('library')}
                 className="inline-flex items-center gap-2 rounded-md border border-[var(--border-strong)] bg-[var(--bg-surface)] px-5 py-2.5 text-sm font-semibold text-[var(--ink-primary)] transition-colors hover:border-[var(--accent)] cursor-pointer"
               >
-                <span>Start editing demo clip</span>
+                <span>Scan a stream or upload video</span>
                 <ArrowUpRight className="h-4 w-4 text-[var(--accent-text)]" aria-hidden="true" />
               </button>
               <a
@@ -659,10 +659,10 @@ export const HomePage: React.FC<HomePageProps> = ({ onNavigate, onAnalyzeStreamU
             </button>
             <button
               type="button"
-              onClick={() => onNavigate('editor', 'demo-clipsy')}
+              onClick={() => onNavigate('library')}
               className="hover:text-[var(--ink-primary)] cursor-pointer"
             >
-              Open Editor
+              Clip Library
             </button>
           </div>
         </div>

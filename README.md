@@ -6,7 +6,7 @@
 
 ## Key Features
 
-- **Stream Link & Local Video Viral Scanner**: Accepts YouTube (`/watch?v=`, `/live/`, `/shorts/`, `/@handle`, `youtu.be`), Kick, and Twitch URLs plus local `.mp4` / `.webm` / `.mov` uploads (`<= 250 MB`). Combines `yt-dlp` metadata/heatmaps (with automatic YouTube oEmbed title/channel/thumbnail fallback), FFmpeg `astats` RMS audio-loudness spike detection, and Gemini AI moment scoring.
+- **Stream Link & Local Video Viral Scanner**: Accepts YouTube (`/watch?v=`, `/live/`, `/shorts/`, `/@handle`, `youtu.be`), Kick, and Twitch URLs plus local `.mp4` / `.webm` / `.mov` uploads (`<= 250 MB`). Resolves the real playable stream media with `yt-dlp` (downloads a bounded copy to `uploads/` for preview and export; no demo footage is preloaded), and combines `yt-dlp` metadata/heatmaps (with automatic YouTube oEmbed fallback), FFmpeg `astats` RMS audio-loudness spike detection, and Gemini AI moment scoring. Each scan produces a configurable **5–8** viral clips (five minimum, eight maximum when more candidates are detected).
 - **Library Snippet Preview & Direct Snippet Handoff**: Preview any detected viral moment inside a bounded `startSec`–`endSec` player modal with scrubbing, looping, and hook overlay—then click **Open in editor** to load that exact snippet directly onto the timeline.
 - **9:16 Vertical Framing Studio**: Drag and resize independent **Gameplay** and **Facecam** crop boxes over 16:9 sources with real-time canvas preview across four layouts:
   - `Split` (top gameplay, bottom facecam)
@@ -30,7 +30,7 @@
 | **yt-dlp** *(optional but recommended)* | Stream/VOD metadata & heatmap extraction | Looked up in `~/.local/bin/yt-dlp`, `/usr/local/bin/yt-dlp`, `/usr/bin/yt-dlp` |
 | **Gemini API Key** | AI viral moment scoring & auto-generated captions | Uses `@google/genai` server-side only |
 
-> **Note on YouTube bot checks in cloud environments**: When running on cloud/datacenter IPs where YouTube blocks `yt-dlp` with `"Sign in to confirm you're not a bot"`, Clipsy automatically falls back to YouTube's public oEmbed endpoint for real stream title, channel name, and thumbnail metadata, and loads the built-in sample stream for editor framing. Uploading an `.mp4`/`.webm` file directly always processes your exact footage end-to-end.
+> **Note on YouTube bot checks in cloud environments**: When running on cloud/datacenter IPs where YouTube blocks `yt-dlp` with `"Sign in to confirm you're not a bot"`, Clipsy automatically falls back to YouTube's public oEmbed endpoint for real stream title, channel name, and thumbnail metadata. No bundled demo footage is ever substituted: if playable stream media cannot be retrieved, the project is created without a preview and you can upload a local recording in the editor. Uploading an `.mp4`/`.webm` file directly always processes your exact footage end-to-end.
 
 ---
 
@@ -44,7 +44,7 @@ cp .env.example .env
 
 | Variable | Required | Description |
 | --- | --- | --- |
-| `GEMINI_API_KEY` | Recommended | Server-side Google Gemini API key (`AI...`) for viral moment analysis (`POST /api/streams/analyze`, `POST /api/upload`) and caption generation (`POST /api/captions/generate`). Never exposed to the browser. If omitted, FFmpeg audio-peak windows are returned deterministically. |
+| `GEMINI_API_KEY` | Recommended | Server-side Google Gemini API key (`AI...`) for viral moment analysis (`POST /api/streams/analyze`, `POST /api/upload`) and caption generation (`POST /api/captions/generate`). Never exposed to the browser. If omitted, deterministic FFmpeg audio-peak windows and local fallback captions are returned instead. |
 | `APP_URL` | Optional | Public URL where the app is hosted (used for self-referential links/integration docs). |
 | `NODE_ENV` | Optional | Set to `production` when running `npm start` to serve the built `dist/` bundle instead of Vite dev middleware. |
 | `DISABLE_HMR` | Optional | Set to `true` to disable Vite HMR file watching in containerized/remote environments. |
@@ -106,7 +106,7 @@ npx tsx --test src/utils/editorLogic.test.ts
 │   ├── utils/editorLogic.ts        # Pure geometry, URL validation, timeline, export preset/progress & moment range helpers
 │   └── types/clipfast.ts           # Shared TypeScript interfaces
 ├── extension/                      # Unpacked Manifest V3 Chrome Extension (manifest.json, content.js, popup.html, popup.js)
-├── public/assets/demo/             # Built-in 1920x1080 demo gameplay + facecam MP4 stream
+├── public/assets/                  # Static marketing images only (no preloaded demo video)
 └── data/                           # Local persisted library JSON (auto-seeded on first boot)
 ```
 

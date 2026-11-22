@@ -4,6 +4,7 @@ import {
   Pause,
   Play,
   Repeat,
+  VideoOff,
   Volume2,
   VolumeX,
   X,
@@ -32,6 +33,7 @@ export const SnippetPreviewModal: React.FC<SnippetPreviewModalProps> = ({
   const [isMuted, setIsMuted] = useState(false);
   const [isLooping, setIsLooping] = useState(true);
   const [currentSourceSec, setCurrentSourceSec] = useState(moment.startSec);
+  const hasVideo = Boolean(project.videoUrl && project.videoUrl.trim());
 
   const progress = computeSnippetPreviewProgress(
     currentSourceSec,
@@ -159,7 +161,7 @@ export const SnippetPreviewModal: React.FC<SnippetPreviewModalProps> = ({
         <div className="relative aspect-video w-full bg-[var(--bg-stage)]">
           <video
             ref={videoRef}
-            src={project.videoUrl}
+            src={project.videoUrl || undefined}
             playsInline
             muted={isMuted}
             onLoadedMetadata={handleLoadedMetadata}
@@ -167,6 +169,18 @@ export const SnippetPreviewModal: React.FC<SnippetPreviewModalProps> = ({
             onEnded={() => setIsPlaying(false)}
             className="h-full w-full object-contain"
           />
+
+          {!hasVideo && (
+            <div className="absolute inset-0 flex flex-col items-center justify-center gap-2 bg-black/90 px-6 text-center">
+              <VideoOff className="h-7 w-7 text-white/50" aria-hidden="true" />
+              <p className="font-mono text-[11px] font-bold tracking-wider text-white">
+                NO SOURCE VIDEO LOADED
+              </p>
+              <p className="max-w-[320px] text-[11px] leading-relaxed text-white/60">
+                This project has no playable stream media. Scan a stream with media access or upload a local recording in the editor.
+              </p>
+            </div>
+          )}
 
           {/* AI Hook Caption Preview Overlay */}
           {moment.hookText && (
@@ -178,8 +192,9 @@ export const SnippetPreviewModal: React.FC<SnippetPreviewModalProps> = ({
           <button
             type="button"
             aria-label={isPlaying ? 'Pause snippet' : 'Play snippet'}
+            disabled={!hasVideo}
             onClick={togglePlay}
-            className="absolute top-1/2 left-1/2 flex h-12 w-12 -translate-x-1/2 -translate-y-1/2 items-center justify-center rounded-full border border-white/25 bg-black/75 text-white transition-colors hover:border-[var(--accent)] hover:text-[var(--accent)] cursor-pointer"
+            className="absolute top-1/2 left-1/2 flex h-12 w-12 -translate-x-1/2 -translate-y-1/2 items-center justify-center rounded-full border border-white/25 bg-black/75 text-white transition-colors hover:border-[var(--accent)] hover:text-[var(--accent)] cursor-pointer disabled:cursor-not-allowed disabled:opacity-40"
           >
             {isPlaying ? (
               <Pause className="h-5 w-5 fill-current" aria-hidden="true" />
@@ -195,8 +210,9 @@ export const SnippetPreviewModal: React.FC<SnippetPreviewModalProps> = ({
             <button
               type="button"
               onClick={togglePlay}
+              disabled={!hasVideo}
               aria-label={isPlaying ? 'Pause' : 'Play'}
-              className="flex h-8 w-8 shrink-0 items-center justify-center rounded border border-[var(--border-strong)] bg-[var(--bg-surface)] text-[var(--ink-primary)] hover:border-[var(--accent)] cursor-pointer"
+              className="flex h-8 w-8 shrink-0 items-center justify-center rounded border border-[var(--border-strong)] bg-[var(--bg-surface)] text-[var(--ink-primary)] hover:border-[var(--accent)] cursor-pointer disabled:cursor-not-allowed disabled:opacity-40"
             >
               {isPlaying ? (
                 <Pause className="h-3.5 w-3.5" aria-hidden="true" />
@@ -212,6 +228,7 @@ export const SnippetPreviewModal: React.FC<SnippetPreviewModalProps> = ({
               max={progress.durationSec}
               step={0.1}
               value={progress.elapsedSec}
+              disabled={!hasVideo}
               onChange={handleScrub}
               style={{ accentColor: 'var(--accent)' }}
               className="flex-1 cursor-pointer"

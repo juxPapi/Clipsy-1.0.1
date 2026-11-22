@@ -715,6 +715,157 @@ export function computeExportProgressStage(
   };
 }
 
+/** Default number of viral clips generated from a stream. */
+export const MIN_GENERATED_CLIPS = 5;
+/** Upper bound when more than five potential viral moments are detected. */
+export const MAX_GENERATED_CLIPS = 8;
+
+/**
+ * Normalizes detected viral moments into a predictable 5-8 clip set.
+ *
+ * Stream scans may return fewer than five candidates (e.g. only a couple of
+ * audio spikes) or many more than eight. This keeps the highest scoring real
+ * moments, drops heavily overlapping duplicates, and pads the result back up
+ * to the five-clip minimum using measured signal seeds (audio/heatmap peaks)
+ * or evenly spaced fallback windows. The result is always capped at eight.
+ */
+export function normalizeViralMoments(
+  candidates: ViralMoment[],
+  totalDurationSec: number,
+  signalSeeds: Array<{ startSec: number; endSec?: number; peakMetric?: string }> = []
+): ViralMoment[] {
+  const duration = Math.max(15, Number(totalDurationSec) || 54);
+  const round1 = (n: number) => Number(n.toFixed(1));
+  const minSpan = Math.min(6, duration / (MAX_GENERATED_CLIPS + 2));
+  const maxSpan = Math.min(28, Math.max(8, duration / 3));
+
+  const sanitize = (m: ViralMoment, idx: number): ViralMoment | null => {
+    const start = Math.max(0, Math.min(duration - minSpan, Number(m.startSec) || 0));
+    const requestedEnd = Number(m.endSec) || start + minSpan;
+    // Cap a single moment's span so one full-stream window cannot consume the
+    // whole timeline and starve the remaining clips on short streams.
+    const end = Math.min(duration, start + maxSpan, Math.max(start + minSpan, requestedEnd));
+    if (!Number.isFinite(start) || !Number.isFinite(end) || end <= start) return null;
+    return {
+      ...m,
+      id: m.id || `vm-normalized-${idx + 1}`,
+      startSec: round1(start),
+      endSec: round1(Math.min(duration, end)),
+      score: Math.max(50, Math.min(99, Math.round(Number(m.score) || 80))),
+    };
+  };
+
+  const sorted = candidates
+    .map(sanitize)
+    .filter((m): m is ViralMoment => m !== null)
+    .sort((a, b) => b.score - a.score);
+
+  // Drop windows that overlap an already-kept window by more than 65%.
+  const kept: ViralMoment[] = [];
+  for (const moment of sorted) {
+    const overlaps = kept.some((other) => {
+      const overlap = Math.min(moment.endSec, other.endSec) - Math.max(moment.startSec, other.startSec);
+      const smaller = Math.min(moment.endSec - moment.startSec, other.endSec - other.startSec);
+      return overlap > 0 && overlap / Math.max(0.1, smaller) > 0.65;
+    });
+    if (!overlaps) kept.push(moment);
+    if (kept.length >= MAX_GENERATED_CLIPS) break;
+  }
+
+  const usedIds = new Set(kept.map((m) => m.id));
+  const conflicts = (start: number, end: number) =>
+    kept.some((m) => Math.min(m.endSec, end) - Math.max(m.startSec, start) > 0);
+
+  const makeSynthetic = (
+    startRaw: number,
+    endRaw: number | undefined,
+    idx: number,
+    reason: string,
+    peakMetric: string
+  ): ViralMoment => {
+    const start = Math.max(0, Math.min(duration - minSpan, round1(startRaw)));
+    const desiredSpan = endRaw === undefined ? Math.min(maxSpan, Math.max(minSpan, round1(duration / MIN_GENERATED_CLIPS))) : endRaw - start;
+    const span = Math.max(minSpan, Math.min(maxSpan, round1(desiredSpan)));
+    const end = round1(Math.min(duration, start + span));
+    const categories: ViralMoment['category'][] = ['clutch', 'reaction', 'chat-spike', 'humor', 'callout'];
+    return {
+      id: `vm-auto-${idx + 1}-${Math.round(start * 10)}`,
+      title: ` viral moment #${idx + 1}`.trim(),
+      startSec: start,
+      endSec: end > start ? end : round1(Math.min(duration, start + minSpan)),
+      score: Math.max(62, 86 - idx * 4),
+      category: categories[idx % categories.length],
+      reason,
+      hookText: ['WATCH THIS', 'NO WAY', 'CHAT WENT WILD', 'CLUTCH MOMENT', 'HIGHLIGHT'][idx % 5],
+      peakMetric: peakMetric || 'Detected signal window',
+    };
+  };
+
+  // First pad with measured signal peaks that are not already represented.
+  for (const seed of signalSeeds) {
+    if (kept.length >= MIN_GENERATED_CLIPS) break;
+    const start = Math.max(0, Number(seed.startSec) || 0);
+    const end = seed.endSec === undefined ? undefined : Math.max(start + minSpan, Number(seed.endSec));
+    if (!Number.isFinite(start) || conflicts(start, (end ?? start) + minSpan)) continue;
+    const synthetic = makeSynthetic(
+      start,
+      end,
+      kept.length,
+      'Measured signal peak window selected to meet the five-clip minimum.',
+      seed.peakMetric || 'Signal peak'
+    );
+    if (!usedIds.has(synthetic.id) && !conflicts(synthetic.startSec, synthetic.endSec)) {
+      kept.push(synthetic);
+      usedIds.add(synthetic.id);
+    }
+  }
+
+  // Finally fill with non-overlapping windows spread across the source timeline.
+  // Try progressively smaller spans at each position so crowded streams still
+  // reach the five-clip minimum instead of stalling on long overlapping windows.
+  const preferredSpan = Math.min(maxSpan, Math.max(minSpan, round1(duration / MIN_GENERATED_CLIPS)));
+  const spans = Array.from(new Set([preferredSpan, round1(preferredSpan / 2), minSpan])).sort(
+    (a, b) => b - a
+  );
+  for (let start = 0; start <= duration - minSpan && kept.length < MIN_GENERATED_CLIPS; start = round1(start + minSpan / 2)) {
+    for (const span of spans) {
+      if (kept.length >= MIN_GENERATED_CLIPS) break;
+      const synthetic = makeSynthetic(
+        start,
+        start + span,
+        kept.length,
+        'High-retention window distributed across the stream timeline.',
+        'Timeline window'
+      );
+      if (conflicts(synthetic.startSec, synthetic.endSec) || usedIds.has(synthetic.id)) continue;
+      kept.push(synthetic);
+      usedIds.add(synthetic.id);
+    }
+  }
+
+  // Very short streams cannot fit five strictly non-overlapping windows. As a
+  // last resort allow distinct, staggered windows (never near-duplicate starts)
+  // so the configured minimum is still honoured.
+  if (kept.length < MIN_GENERATED_CLIPS) {
+    for (let start = 0; start <= duration - minSpan && kept.length < MIN_GENERATED_CLIPS; start = round1(start + minSpan / 2)) {
+      const nearDuplicate = kept.some((m) => Math.abs(m.startSec - start) < minSpan / 2);
+      if (nearDuplicate) continue;
+      const synthetic = makeSynthetic(
+        start,
+        start + preferredSpan,
+        kept.length,
+        'Additional staggered highlight window on a short stream.',
+        'Timeline window'
+      );
+      if (usedIds.has(synthetic.id)) continue;
+      kept.push(synthetic);
+      usedIds.add(synthetic.id);
+    }
+  }
+
+  return kept.slice(0, MAX_GENERATED_CLIPS);
+}
+
 /**
  * Formats rendered MP4 byte counts into human-readable KB / MB labels.
  */

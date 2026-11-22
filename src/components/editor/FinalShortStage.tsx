@@ -23,6 +23,7 @@ interface FinalShortStageProps {
   exportPreset: ExportPreset;
   accentHex: string;
   showSafeArea?: boolean;
+  hasVideoSource?: boolean;
 }
 
 const CANVAS_W = 360;
@@ -41,6 +42,7 @@ export const FinalShortStage: React.FC<FinalShortStageProps> = ({
   exportPreset,
   accentHex,
   showSafeArea = true,
+  hasVideoSource = true,
 }) => {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const exportSpec = resolveExportSpec(exportPreset);
@@ -277,7 +279,14 @@ export const FinalShortStage: React.FC<FinalShortStageProps> = ({
             className="h-full w-full block"
           />
 
-          {showSafeArea && (
+          {!hasVideoSource && (
+            <div className="pointer-events-none absolute inset-0 flex flex-col items-center justify-center gap-1 bg-black/85 px-4 text-center">
+              <span className="font-mono text-[10px] font-bold tracking-wider text-white">NO SOURCE VIDEO</span>
+              <span className="text-[10px] leading-tight text-white/60">Scan a stream or upload a video to preview the 9:16 frame.</span>
+            </div>
+          )}
+
+          {showSafeArea && hasVideoSource && (
             <div className="pointer-events-none absolute inset-4 border border-dashed border-white/30">
               <div className="absolute bottom-3 left-2.5 bg-black/85 px-2.5 py-1.5 font-mono text-[9px] leading-tight tracking-wider text-white">
                 SAFE AREA · NOT EXPORTED

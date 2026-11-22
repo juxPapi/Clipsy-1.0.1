@@ -15,10 +15,6 @@ import { resolveSnippetForProject } from './utils/editorLogic';
 
 function routeFromLocation(): { route: AppRoute; projectId?: string } {
   const path = window.location.pathname.toLowerCase();
-  const params = new URLSearchParams(window.location.search);
-  if (params.get('autostart') === '1') {
-    return { route: 'editor', projectId: 'demo-clipsy' };
-  }
   if (path === '/library' || path === '/edit/library') {
     return { route: 'library' };
   }
@@ -27,10 +23,7 @@ function routeFromLocation(): { route: AppRoute; projectId?: string } {
   }
   if (path === '/editor' || path.startsWith('/edit/')) {
     const seg = path.replace(/^\/edit\//, '').replace(/^\/editor\/?/, '');
-    return {
-      route: 'editor',
-      projectId: seg && seg !== 'demo' ? seg : 'demo-clipsy',
-    };
+    return { route: 'editor', projectId: seg || undefined };
   }
   return { route: 'home' };
 }
@@ -60,8 +53,8 @@ export default function App() {
   const initial = routeFromLocation();
   const [route, setRoute] = useState<AppRoute>(initial.route);
   const [projects, setProjects] = useState<ClipProject[]>([]);
-  const [activeProjectId, setActiveProjectId] = useState<string>(
-    initial.projectId || 'demo-clipsy'
+  const [activeProjectId, setActiveProjectId] = useState<string | null>(
+    initial.projectId ?? null
   );
   const [loading, setLoading] = useState(true);
   const [lastScannedProjectId, setLastScannedProjectId] = useState<string | null>(null);
@@ -109,7 +102,7 @@ export default function App() {
     let url = '/home';
     if (nextRoute === 'library') url = '/edit/library';
     else if (nextRoute === 'live-clipping') url = '/live-clipping';
-    else if (nextRoute === 'editor') url = `/edit/${projectId || activeProjectId || 'demo-clipsy'}`;
+    else if (nextRoute === 'editor') url = `/edit/${projectId || activeProjectId || ''}`;
 
     if (window.location.pathname !== url) {
       window.history.pushState({}, '', url);
@@ -199,10 +192,27 @@ export default function App() {
     projects.find((p) => p.id === activeProjectId) || projects[0];
 
   if (route === 'editor') {
-    if (loading || !activeProject) {
+    if (loading) {
       return (
         <div className="flex h-screen items-center justify-center bg-[var(--bg-canvas)] font-mono text-xs text-[var(--ink-muted)]">
           Loading Clipsy Editor...
+        </div>
+      );
+    }
+    if (!activeProject) {
+      return (
+        <div className="flex h-screen flex-col items-center justify-center gap-4 bg-[var(--bg-canvas)] px-6 text-center text-[var(--ink-primary)]">
+          <p className="font-display text-2xl font-extrabold">No video loaded</p>
+          <p className="max-w-md text-sm text-[var(--ink-muted)]">
+            Scan a YouTube, Kick, or Twitch stream—or upload a recording—from the library to start editing. No demo media is bundled.
+          </p>
+          <button
+            type="button"
+            onClick={() => navigate('library')}
+            className="rounded-md bg-[var(--accent)] px-5 py-2.5 text-sm font-bold text-[var(--accent-fg)] cursor-pointer"
+          >
+            Open clip library
+          </button>
         </div>
       );
     }

@@ -17,9 +17,11 @@ import {
   detectAudioSpikes,
   fetchYoutubeOembedMetadata,
   generateCaptionsWithGemini,
+  hasBinary,
   identifyViralMomentsWithGemini,
   inspectStreamWithYtDlp,
   probeVideoFile,
+  resolveStreamPlayback,
   resolveYtDlpBinary,
 } from './server/services/streamAnalyzer';
 import { exportVerticalShortMp4 } from './server/services/videoExporter';
@@ -41,164 +43,41 @@ fs.mkdirSync(UPLOADS_DIR, { recursive: true });
 fs.mkdirSync(EXPORTS_DIR, { recursive: true });
 fs.mkdirSync(DATA_DIR, { recursive: true });
 
+/** Accepts only browser-playable local upload paths or http(s) stream URLs. */
+function safeClientVideoUrl(value: unknown): string {
+  if (typeof value !== 'string') return '';
+  if (value.startsWith('/uploads/') && !value.includes('..')) return value;
+  try {
+    const parsed = new URL(value);
+    return parsed.protocol === 'https:' || parsed.protocol === 'http:' ? value : '';
+  } catch {
+    return '';
+  }
+}
+
 function seedDefaultProjects(): ClipProject[] {
-  return [
-    {
-      id: 'demo-clipsy',
-      title: 'Sub Goal Clutch · 9:16 Reframe',
-      fileName: 'Clipsy-fps-clutch.mp4',
-      platform: 'twitch',
-      sourceUrl: 'https://www.twitch.tv/videos/2184901234',
-      videoUrl: '/assets/demo/ClipFast-clip.mp4',
-      thumbnailUrl: '/src/assets/images/gaming_stream_fps_1795371872867.jpg',
-      channelName: 'MackJr_Live',
-      durationSec: 54.0,
-      fps: 30.001,
-      sourceWidth: 1920,
-      sourceHeight: 1080,
-      createdAt: new Date().toISOString(),
-      status: 'viral-detected',
-      layout: 'split',
-      gameplayCrop: { ...DEFAULT_GAMEPLAY_CROP },
-      facecamCrop: { ...DEFAULT_FACECAM_CROP },
-      segments: [{ id: 'seg-1', label: 'Master clip', sourceStartSec: 0, sourceEndSec: 54 }],
-      overlays: [],
-      captions: [
-        {
-          id: 'cap-seed-1',
-          text: 'CHAT WENT WILD ON THIS PLAY',
-          startSec: 12,
-          endSec: 17,
-          highlightWord: 'WILD',
-        },
-        {
-          id: 'cap-seed-2',
-          text: 'NO WAY HE HIT THAT',
-          startSec: 27,
-          endSec: 34,
-          highlightWord: 'HIT',
-        },
-      ],
-      captionStyle: 'bold-highlight',
-      audioTracks: [],
-      effects: [],
-      masterVolume: 1,
-      viralMoments: [
-        {
-          id: 'vm-seed-1',
-          title: 'Audio Peak · Endgame Push',
-          startSec: 12.0,
-          endSec: 17.5,
-          score: 94,
-          category: 'clutch',
-          reason: 'Audio loudness surge + chat velocity spike detected.',
-          hookText: 'WAIT FOR THIS ENDING',
-          peakMetric: '+12 dB audio peak',
-        },
-        {
-          id: 'vm-seed-2',
-          title: 'Chat Explosion · 2.8x Spike',
-          startSec: 27.0,
-          endSec: 34.0,
-          score: 97,
-          category: 'chat-spike',
-          reason: 'Sustained reaction and highest RMS energy window in clip.',
-          hookText: 'CHAT LOST IT HERE',
-          peakMetric: '2.8x chat rate',
-        },
-        {
-          id: 'vm-seed-3',
-          title: 'Post-Play Reaction',
-          startSec: 42.0,
-          endSec: 49.0,
-          score: 89,
-          category: 'reaction',
-          reason: 'Strong facecam reaction window ideal for split layout.',
-          hookText: 'BRO COULD NOT BELIEVE IT',
-          peakMetric: '+9 dB vocal peak',
-        },
-      ],
-      selectedMomentId: 'vm-seed-2',
-    },
-    {
-      id: 'kick-highlight-02',
-      title: 'Kick Live Drift Overtime · Circuit',
-      fileName: 'Kick-apex-drift.mp4',
-      platform: 'kick',
-      sourceUrl: 'https://kick.com/clipsy-demo',
-      videoUrl: '/assets/demo/ClipFast-clip.mp4',
-      thumbnailUrl: '/src/assets/images/gaming_poster_racing_1795371871712.jpg',
-      channelName: 'Apex_Kick',
-      durationSec: 54.0,
-      fps: 30,
-      sourceWidth: 1280,
-      sourceHeight: 720,
-      createdAt: new Date(Date.now() - 3600_000).toISOString(),
-      status: 'ready',
-      layout: 'round-facecam',
-      gameplayCrop: { x: 0.14, y: 0.04, width: 0.56, height: 0.92 },
-      facecamCrop: { x: 0.03, y: 0.58, width: 0.24, height: 0.36 },
-      segments: [{ id: 'seg-k1', label: 'Overtime Clip', sourceStartSec: 25, sourceEndSec: 48 }],
-      overlays: [],
-      captions: [],
-      captionStyle: 'bold-highlight',
-      audioTracks: [],
-      effects: [],
-      masterVolume: 1,
-      viralMoments: [
-        {
-          id: 'vm-kick-1',
-          title: 'Overtime Callout',
-          startSec: 27,
-          endSec: 34,
-          score: 91,
-          category: 'chat-spike',
-          reason: 'Detected via Kick live chat burst.',
-          hookText: 'OVERTIME LOCK IN',
-          peakMetric: '142 msgs/min',
-        },
-      ],
-    },
-    {
-      id: 'yt-vod-03',
-      title: 'YouTube VOD · Alpine Drop Final Ring',
-      fileName: 'YT-final-ring.mp4',
-      platform: 'youtube',
-      sourceUrl: 'https://www.youtube.com/watch?v=dQw4w9WgXcQ',
-      videoUrl: '/assets/demo/ClipFast-clip.mp4',
-      thumbnailUrl: '/src/assets/images/gaming_poster_arena_1795371873067.jpg',
-      channelName: 'ArenaVODs',
-      durationSec: 54.0,
-      fps: 30,
-      sourceWidth: 1280,
-      sourceHeight: 720,
-      createdAt: new Date(Date.now() - 7200_000).toISOString(),
-      status: 'ready',
-      layout: 'small-facecam',
-      gameplayCrop: { x: 0.12, y: 0.02, width: 0.56, height: 0.96 },
-      facecamCrop: { x: 0.03, y: 0.58, width: 0.24, height: 0.36 },
-      segments: [{ id: 'seg-y1', label: 'Final Ring', sourceStartSec: 10, sourceEndSec: 36 }],
-      overlays: [],
-      captions: [],
-      captionStyle: 'clean-box',
-      audioTracks: [],
-      effects: [],
-      masterVolume: 1,
-      viralMoments: [],
-    },
-  ];
+  // No bundled demo projects or preloaded media: projects come from a real
+  // stream scan, a local upload, or a live capture.
+  return [];
 }
 
 function loadLibrary(): ClipProject[] {
   try {
     if (fs.existsSync(LIBRARY_FILE)) {
       const parsed = JSON.parse(fs.readFileSync(LIBRARY_FILE, 'utf8'));
-      if (Array.isArray(parsed) && parsed.length > 0) {
-        return parsed;
+      if (Array.isArray(parsed)) {
+        // Drop legacy seeded projects that pointed at bundled demo footage.
+        const cleaned = parsed.filter(
+          (p) => p && typeof p.videoUrl === 'string' && !p.videoUrl.includes('/assets/demo/')
+        );
+        if (cleaned.length !== parsed.length) {
+          saveLibrary(cleaned);
+        }
+        return cleaned;
       }
     }
   } catch {
-    // Fall back to seeded projects
+    // Fall back to an empty library
   }
   const seeded = seedDefaultProjects();
   fs.writeFileSync(LIBRARY_FILE, JSON.stringify(seeded, null, 2));
@@ -236,8 +115,8 @@ async function startServer() {
     res.json({
       ok: true,
       engines: {
-        ffmpeg: fs.existsSync('/usr/bin/ffmpeg'),
-        ffprobe: fs.existsSync('/usr/bin/ffprobe'),
+        ffmpeg: hasBinary('ffmpeg', '-version'),
+        ffprobe: hasBinary('ffprobe', '-version'),
         ytDlp: Boolean(ytDlpPath),
         gemini: Boolean(process.env.GEMINI_API_KEY && process.env.GEMINI_API_KEY !== 'MY_GEMINI_API_KEY'),
       },
@@ -297,10 +176,13 @@ async function startServer() {
       meta?.uploader || oembedMeta?.uploader || parsed.identifier || parsed.platform;
     const durationSec = meta?.durationSec || 54;
 
-    // Also run FFmpeg audio-peak detection on our demo stream if external video cannot be downloaded directly
-    const demoPath = path.resolve(ROOT_DIR, 'public', 'assets', 'demo', 'ClipFast-clip.mp4');
-    const audioSpikes = fs.existsSync(demoPath)
-      ? await detectAudioSpikes(demoPath, Math.min(durationSec, 54))
+    // Resolve and use the stream's REAL playable media. No bundled demo footage
+    // is ever attached to a scanned project.
+    const mediaId = `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 7)}`;
+    const media = await resolveStreamPlayback(parsed.canonicalUrl, UPLOADS_DIR, mediaId);
+    const analysisMediaPath = media.localPath || media.videoUrl;
+    const audioSpikes = analysisMediaPath
+      ? await detectAudioSpikes(analysisMediaPath, Math.min(durationSec, 600))
       : [];
 
     const aiResult = await identifyViralMomentsWithGemini({
@@ -315,12 +197,12 @@ async function startServer() {
     });
 
     const project: ClipProject = {
-      id: `stream-${Date.now().toString(36)}`,
+      id: `stream-${mediaId}`,
       title,
       fileName: `${parsed.platform}-${(parsed.identifier || 'clip').slice(0, 18)}.mp4`,
       platform: parsed.platform,
       sourceUrl: parsed.canonicalUrl,
-      videoUrl: '/assets/demo/ClipFast-clip.mp4',
+      videoUrl: media.videoUrl,
       thumbnailUrl:
         meta?.thumbnailUrl ||
         oembedMeta?.thumbnailUrl ||
@@ -337,7 +219,7 @@ async function startServer() {
       facecamCrop: { ...DEFAULT_FACECAM_CROP },
       segments: [
         {
-          id: `seg-${Date.now().toString(36)}`,
+          id: `seg-${mediaId}`,
           label: aiResult.moments[0]?.title || 'Master clip',
           sourceStartSec: aiResult.moments[0]?.startSec ?? 0,
           sourceEndSec: Math.min(durationSec, aiResult.moments[0]?.endSec ?? Math.min(durationSec, 30)),
@@ -363,6 +245,8 @@ async function startServer() {
       ytDlpDiagnostic: ytResult.error,
       usedGemini: aiResult.usedGemini,
       geminiError: aiResult.error,
+      mediaSource: media.source,
+      mediaNote: media.note,
       project,
     });
   });
@@ -529,7 +413,7 @@ async function startServer() {
       fileName: `${platform}-live-spike.mp4`,
       platform,
       sourceUrl,
-      videoUrl: '/assets/demo/ClipFast-clip.mp4',
+      videoUrl: safeClientVideoUrl(req.body?.videoUrl),
       thumbnailUrl: '/src/assets/images/gaming_poster_showdown_1795371872597.jpg',
       channelName: String(req.body?.channelName || `${platform}Stream`),
       durationSec: 54,

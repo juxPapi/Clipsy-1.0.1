@@ -58,6 +58,20 @@ export function resolveLocalVideoPath(rootDir: string, videoUrl: string): string
   return null;
 }
 
+function isRemoteHttpMedia(value: string): boolean {
+  if (!value || typeof value !== 'string') return false;
+  try {
+    const url = new URL(value);
+    if (url.protocol !== 'https:' && url.protocol !== 'http:') return false;
+    const host = url.hostname.toLowerCase();
+    if (host === 'localhost' || host === '0.0.0.0' || host === '::1') return false;
+    if (/^\d{1,3}(\.\d{1,3}){3}$/.test(host)) return false;
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 function escapeDrawtext(text: string): string {
   return text
     .replace(/\\/g, '\\\\')
@@ -74,9 +88,10 @@ export async function exportVerticalShortMp4(
   rootDir: string,
   payload: ExportRequestPayload
 ): Promise<{ outputPath: string; fileName: string; width: number; height: number; fps: number; preset: ExportPreset }> {
-  const inputPath = resolveLocalVideoPath(rootDir, payload.videoUrl);
+  const localPath = resolveLocalVideoPath(rootDir, payload.videoUrl);
+  const inputPath = localPath || (isRemoteHttpMedia(payload.videoUrl) ? payload.videoUrl : '');
   if (!inputPath) {
-    throw new Error('Source video file not found locally for FFmpeg export.');
+    throw new Error('No playable source video loaded. Scan a stream with media access or upload a video file first.');
   }
 
   const exportsDir = path.resolve(rootDir, 'exports');

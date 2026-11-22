@@ -487,16 +487,14 @@ export const LibraryPage: React.FC<LibraryPageProps> = ({
                         ? `Open snippet (${formatTimecode(activeMoment.startSec)}–${formatTimecode(activeMoment.endSec)})`
                         : 'Open in editor'}
                     </button>
-                    {project.id !== 'demo-clipsy' && project.id !== 'demo-clipfast' && (
-                      <button
-                        type="button"
-                        aria-label={`Delete ${project.title}`}
-                        onClick={() => onDeleteProject(project.id)}
-                        className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded border border-[var(--border-strong)] text-[var(--ink-muted)] hover:border-rose-500/60 hover:text-rose-500 cursor-pointer"
-                      >
-                        <Trash2 className="h-3.5 w-3.5" aria-hidden="true" />
-                      </button>
-                    )}
+                    <button
+                      type="button"
+                      aria-label={`Delete ${project.title}`}
+                      onClick={() => onDeleteProject(project.id)}
+                      className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded border border-[var(--border-strong)] text-[var(--ink-muted)] hover:border-rose-500/60 hover:text-rose-500 cursor-pointer"
+                    >
+                      <Trash2 className="h-3.5 w-3.5" aria-hidden="true" />
+                    </button>
                   </div>
                 </article>
               );

@@ -1,5 +1,5 @@
 import React, { useRef } from 'react';
-import { Pause, Play } from 'lucide-react';
+import { Pause, Play, VideoOff } from 'lucide-react';
 import type { CropRect, LayoutMode } from '../../types/clipfast';
 import { clampCropRect } from '../../utils/editorLogic';
 
@@ -116,6 +116,7 @@ export const SourceFramingStage: React.FC<SourceFramingStageProps> = ({
   };
 
   const showFacecamBox = layout !== 'fullscreen';
+  const hasVideo = Boolean(videoUrl && videoUrl.trim());
 
   return (
     <div className="flex min-h-0 flex-col">
@@ -135,7 +136,7 @@ export const SourceFramingStage: React.FC<SourceFramingStageProps> = ({
         >
           <video
             ref={videoRef}
-            src={videoUrl}
+            src={videoUrl || undefined}
             playsInline
             muted={isMuted}
             onLoadedMetadata={() => {
@@ -148,6 +149,18 @@ export const SourceFramingStage: React.FC<SourceFramingStageProps> = ({
             onEnded={onVideoEnded}
             className="h-full w-full object-contain"
           />
+
+          {!hasVideo && (
+            <div className="absolute inset-0 z-[5] flex flex-col items-center justify-center gap-2 bg-[#0a0d0b]/95 px-6 text-center">
+              <VideoOff className="h-7 w-7 text-[var(--ink-muted)]" aria-hidden="true" />
+              <p className="font-mono text-[11px] font-bold tracking-wider text-[var(--ink-primary)]">
+                NO SOURCE VIDEO LOADED
+              </p>
+              <p className="max-w-[280px] text-[11px] leading-relaxed text-[var(--ink-muted)]">
+                Scan a stream in the Library or use UPLOAD VIDEO to load your own footage. No demo media is preloaded.
+              </p>
+            </div>
+          )}
 
           {/* Gameplay Crop Box */}
           <div
@@ -190,8 +203,9 @@ export const SourceFramingStage: React.FC<SourceFramingStageProps> = ({
           <button
             type="button"
             aria-label={isPlaying ? 'Pause source video' : 'Play source video'}
+            disabled={!hasVideo}
             onClick={onTogglePlay}
-            className="absolute top-1/2 left-1/2 z-10 flex h-12 w-12 -translate-x-1/2 -translate-y-1/2 items-center justify-center rounded-md border border-white/25 bg-black/80 text-white transition-colors hover:border-[var(--accent)] hover:text-[var(--accent)] cursor-pointer"
+            className="absolute top-1/2 left-1/2 z-10 flex h-12 w-12 -translate-x-1/2 -translate-y-1/2 items-center justify-center rounded-md border border-white/25 bg-black/80 text-white transition-colors hover:border-[var(--accent)] hover:text-[var(--accent)] cursor-pointer disabled:cursor-not-allowed disabled:opacity-40"
           >
             {isPlaying ? (
               <Pause className="h-5 w-5 fill-current" aria-hidden="true" />

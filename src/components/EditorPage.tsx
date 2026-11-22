@@ -105,6 +105,7 @@ export const EditorPage: React.FC<EditorPageProps> = ({
 
   const accentPalette = getAccentPalette(accent);
   const exportSpec = resolveExportSpec(exportPreset);
+  const hasSourceVideo = Boolean(project.videoUrl && project.videoUrl.trim());
 
   const firstSegStart = project.segments[0]?.sourceStartSec ?? 0;
   const firstSegId = project.segments[0]?.id || 'seg-1';
@@ -136,7 +137,7 @@ export const EditorPage: React.FC<EditorPageProps> = ({
 
   const handleTogglePlay = async () => {
     const video = videoRef.current;
-    if (!video) return;
+    if (!video || !hasSourceVideo) return;
     if (video.paused) {
       if (video.currentTime < firstSegStart || video.currentTime >= lastSegEnd - 0.1) {
         video.currentTime = firstSegStart;
@@ -214,6 +215,11 @@ export const EditorPage: React.FC<EditorPageProps> = ({
     const nextSegments = splitSegmentAtTime(project.segments, currentTimeSec);
     if (nextSegments.length !== project.segments.length) {
       mutateProject({ segments: nextSegments });
+      // Splitting replaces the original segment id; keep selection valid so
+      // Delete / split actions on the newly selected piece keep working.
+      if (!nextSegments.some((s) => s.id === selectedSegmentId)) {
+        setSelectedSegmentId(nextSegments[0].id);
+      }
     }
   };
 
@@ -269,6 +275,10 @@ export const EditorPage: React.FC<EditorPageProps> = ({
   };
 
   const handleExportShort = async () => {
+    if (!hasSourceVideo) {
+      setExportError('No source video loaded. Scan a stream with media access or upload a video first.');
+      return;
+    }
     stopExportTimer();
     setIsExporting(true);
     setExportOverlayOpen(true);
@@ -621,6 +631,7 @@ export const EditorPage: React.FC<EditorPageProps> = ({
               effects={project.effects}
               exportPreset={exportPreset}
               accentHex={accentPalette.swatchHex}
+              hasVideoSource={hasSourceVideo}
             />
           </div>
 
