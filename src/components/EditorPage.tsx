@@ -85,11 +85,22 @@ export const EditorPage: React.FC<EditorPageProps> = ({
   const accentPalette = getAccentPalette(accent);
   const exportSpec = resolveExportSpec(exportPreset);
 
+  const firstSegStart = project.segments[0]?.sourceStartSec ?? 0;
+  const firstSegId = project.segments[0]?.id || 'seg-1';
+  const lastSegEnd =
+    project.segments[project.segments.length - 1]?.sourceEndSec ??
+    (project.durationSec || 54);
+
   useEffect(() => {
-    setSelectedSegmentId(project.segments[0]?.id || 'seg-1');
+    setSelectedSegmentId(firstSegId);
     setCurrentTimeSec(0);
     setIsPlaying(false);
-  }, [project.id]);
+    if (videoRef.current && videoRef.current.readyState >= 1) {
+      videoRef.current.pause();
+      videoRef.current.currentTime = firstSegStart;
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [project.id, project.selectedMomentId]);
 
   const mutateProject = (patch: Partial<ClipProject>) => {
     setIsSaved(false);
@@ -106,6 +117,10 @@ export const EditorPage: React.FC<EditorPageProps> = ({
     const video = videoRef.current;
     if (!video) return;
     if (video.paused) {
+      if (video.currentTime < firstSegStart || video.currentTime >= lastSegEnd - 0.1) {
+        video.currentTime = firstSegStart;
+        setCurrentTimeSec(0);
+      }
       try {
         await video.play();
         setIsPlaying(true);
@@ -131,18 +146,21 @@ export const EditorPage: React.FC<EditorPageProps> = ({
   const handleVideoLoadedMetadata = () => {
     const video = videoRef.current;
     if (!video) return;
-    const firstSeg = project.segments[0];
-    if (firstSeg) {
-      video.currentTime = firstSeg.sourceStartSec;
-    }
+    video.currentTime = firstSegStart;
   };
 
   const handleVideoTimeUpdate = () => {
     const video = videoRef.current;
     if (!video) return;
-    const baseStart = project.segments[0]?.sourceStartSec || 0;
     const total = getTimelineTotalDuration(project.segments);
-    const rel = Math.max(0, Math.min(total, video.currentTime - baseStart));
+    if (!video.paused && video.currentTime >= lastSegEnd - 0.05) {
+      video.pause();
+      video.currentTime = firstSegStart;
+      setIsPlaying(false);
+      setCurrentTimeSec(0);
+      return;
+    }
+    const rel = Math.max(0, Math.min(total, video.currentTime - firstSegStart));
     setCurrentTimeSec(rel);
   };
 

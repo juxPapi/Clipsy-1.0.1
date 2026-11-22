@@ -1,10 +1,12 @@
 import type {
   AccentPaletteId,
+  ClipProject,
   CropRect,
   ExportPreset,
   LayoutMode,
   Platform,
   TimelineSegment,
+  ViralMoment,
 } from '../types/clipfast';
 
 export interface ParsedStreamUrl {
@@ -609,6 +611,43 @@ export function shiftMomentWindow(
   return {
     startSec: Number(nextStart.toFixed(1)),
     endSec: Number((nextStart + span).toFixed(1)),
+  };
+}
+
+/**
+ * Resolves the specific viral snippet to load when opening a project in the editor:
+ * uses an explicitly chosen moment, or the project's selectedMomentId, or its first viral moment.
+ */
+export function resolveSnippetForProject(
+  project: Pick<ClipProject, 'viralMoments' | 'selectedMomentId'>,
+  explicitMoment?: ViralMoment
+): ViralMoment | undefined {
+  if (explicitMoment) return explicitMoment;
+  if (!project.viralMoments || project.viralMoments.length === 0) return undefined;
+  if (project.selectedMomentId) {
+    const matched = project.viralMoments.find((m) => m.id === project.selectedMomentId);
+    if (matched) return matched;
+  }
+  return project.viralMoments[0];
+}
+
+/**
+ * Computes bounded playback progress inside a viral snippet [startSec, endSec].
+ */
+export function computeSnippetPreviewProgress(
+  videoTimeSec: number,
+  startSec: number,
+  endSec: number
+): { elapsedSec: number; durationSec: number; progressPct: number; isFinished: boolean } {
+  const durationSec = Math.max(0.5, Number((endSec - startSec).toFixed(1)));
+  const rawElapsed = videoTimeSec - startSec;
+  const elapsedSec = Math.max(0, Math.min(durationSec, Number(rawElapsed.toFixed(1))));
+  const progressPct = Math.max(0, Math.min(100, (elapsedSec / durationSec) * 100));
+  return {
+    elapsedSec,
+    durationSec,
+    progressPct,
+    isFinished: videoTimeSec >= endSec - 0.05,
   };
 }
 

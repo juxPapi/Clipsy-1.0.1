@@ -338,7 +338,7 @@ async function startServer() {
       segments: [
         {
           id: `seg-${Date.now().toString(36)}`,
-          label: 'Master clip',
+          label: aiResult.moments[0]?.title || 'Master clip',
           sourceStartSec: aiResult.moments[0]?.startSec ?? 0,
           sourceEndSec: Math.min(durationSec, aiResult.moments[0]?.endSec ?? Math.min(durationSec, 30)),
         },

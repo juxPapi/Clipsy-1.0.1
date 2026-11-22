@@ -5,6 +5,7 @@ import {
   clampMomentRange,
   computeChatSpikeScore,
   computeLayoutGeometry,
+  computeSnippetPreviewProgress,
   deleteSegmentById,
   formatPreciseTimecode,
   formatTimecode,
@@ -13,6 +14,7 @@ import {
   mapTimelineToSourceTime,
   parseStreamUrl,
   resolveExportSpec,
+  resolveSnippetForProject,
   shiftMomentWindow,
   splitSegmentAtTime,
 } from './editorLogic';
@@ -126,5 +128,45 @@ test('clampMomentRange, shiftMomentWindow, and formatPreciseTimecode enforce val
   // Sliding window preserves exact 7.0s span and clamps at edges
   const shifted = shiftMomentWindow(27.0, 34.0, 25.0, 54);
   assert.deepEqual(shifted, { startSec: 47.0, endSec: 54.0 });
+});
+
+test('resolveSnippetForProject and computeSnippetPreviewProgress resolve active snippet cleanly', () => {
+  const m1 = {
+    id: 'm1',
+    title: 'First spike',
+    startSec: 12,
+    endSec: 18,
+    score: 90,
+    category: 'clutch' as const,
+    reason: 'Peak 1',
+    hookText: 'HOOK 1',
+    peakMetric: '+10 dB',
+  };
+  const m2 = {
+    id: 'm2',
+    title: 'Second spike',
+    startSec: 27,
+    endSec: 34,
+    score: 96,
+    category: 'chat-spike' as const,
+    reason: 'Peak 2',
+    hookText: 'HOOK 2',
+    peakMetric: '2.8x spike',
+  };
+
+  assert.equal(resolveSnippetForProject({ viralMoments: [m1, m2], selectedMomentId: 'm2' })?.id, 'm2');
+  assert.equal(resolveSnippetForProject({ viralMoments: [m1, m2], selectedMomentId: 'm2' }, m1)?.id, 'm1');
+  assert.equal(resolveSnippetForProject({ viralMoments: [m1, m2] })?.id, 'm1');
+  assert.equal(resolveSnippetForProject({ viralMoments: [] }), undefined);
+
+  const progMid = computeSnippetPreviewProgress(30.5, 27, 34);
+  assert.equal(progMid.elapsedSec, 3.5);
+  assert.equal(progMid.durationSec, 7);
+  assert.equal(progMid.progressPct, 50);
+  assert.equal(progMid.isFinished, false);
+
+  const progEnd = computeSnippetPreviewProgress(34.0, 27, 34);
+  assert.equal(progEnd.isFinished, true);
+  assert.equal(progEnd.progressPct, 100);
 });
 

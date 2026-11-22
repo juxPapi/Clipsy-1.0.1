@@ -11,6 +11,7 @@ import type {
   ThemeMode,
   ViralMoment,
 } from './types/clipfast';
+import { resolveSnippetForProject } from './utils/editorLogic';
 
 function routeFromLocation(): { route: AppRoute; projectId?: string } {
   const path = window.location.pathname.toLowerCase();
@@ -63,6 +64,7 @@ export default function App() {
     initial.projectId || 'demo-clipsy'
   );
   const [loading, setLoading] = useState(true);
+  const [lastScannedProjectId, setLastScannedProjectId] = useState<string | null>(null);
   const [theme, setTheme] = useState<ThemeMode>(readStoredTheme);
   const [accent, setAccent] = useState<AccentPaletteId>(readStoredAccent);
 
@@ -127,6 +129,7 @@ export default function App() {
     }
     if (data.project) {
       setProjects((prev) => [data.project, ...prev.filter((p) => p.id !== data.project.id)]);
+      setLastScannedProjectId(data.project.id);
       return data.project;
     }
     return null;
@@ -146,6 +149,7 @@ export default function App() {
     if (data.project) {
       setProjects((prev) => [data.project, ...prev]);
       setActiveProjectId(data.project.id);
+      setLastScannedProjectId(data.project.id);
       return data.project;
     }
     return null;
@@ -168,27 +172,26 @@ export default function App() {
     setProjects((prev) => prev.filter((p) => p.id !== id));
   };
 
-  const handleOpenEditor = (projectId: string, moment?: ViralMoment) => {
-    if (moment) {
-      setProjects((prev) =>
-        prev.map((p) =>
-          p.id === projectId
-            ? {
-                ...p,
-                segments: [
-                  {
-                    id: `seg-${moment.id}`,
-                    label: moment.title,
-                    sourceStartSec: moment.startSec,
-                    sourceEndSec: moment.endSec,
-                  },
-                ],
-                selectedMomentId: moment.id,
-              }
-            : p
-        )
-      );
-    }
+  const handleOpenEditor = (projectId: string, explicitMoment?: ViralMoment) => {
+    setProjects((prev) =>
+      prev.map((p) => {
+        if (p.id !== projectId) return p;
+        const snippet = resolveSnippetForProject(p, explicitMoment);
+        if (!snippet) return p;
+        return {
+          ...p,
+          segments: [
+            {
+              id: `seg-${snippet.id}`,
+              label: snippet.title,
+              sourceStartSec: snippet.startSec,
+              sourceEndSec: snippet.endSec,
+            },
+          ],
+          selectedMomentId: snippet.id,
+        };
+      })
+    );
     navigate('editor', projectId);
   };
 
@@ -239,6 +242,9 @@ export default function App() {
       {route === 'library' && (
         <LibraryPage
           projects={projects}
+          initialScannedProject={
+            projects.find((p) => p.id === lastScannedProjectId) ?? null
+          }
           onOpenEditor={handleOpenEditor}
           onAnalyzeStreamUrl={handleAnalyzeStreamUrl}
           onUploadVideo={handleUploadVideo}

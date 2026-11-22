@@ -1,7 +1,8 @@
-import React, { useRef, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import {
   ArrowUpRight,
   Link2,
+  Play,
   Search,
   Sparkles,
   Trash2,
@@ -9,11 +10,18 @@ import {
   Video,
 } from 'lucide-react';
 import type { ClipProject, Platform, ViralMoment } from '../types/clipfast';
-import { formatTimecode, parseStreamUrl } from '../utils/editorLogic';
+import {
+  formatPreciseTimecode,
+  formatTimecode,
+  parseStreamUrl,
+  resolveSnippetForProject,
+} from '../utils/editorLogic';
 import type { AppRoute } from './Navbar';
+import { SnippetPreviewModal } from './SnippetPreviewModal';
 
 interface LibraryPageProps {
   projects: ClipProject[];
+  initialScannedProject?: ClipProject | null;
   onOpenEditor: (projectId: string, moment?: ViralMoment) => void;
   onAnalyzeStreamUrl: (url: string) => Promise<ClipProject | null>;
   onUploadVideo: (file: File) => Promise<ClipProject | null>;
@@ -37,6 +45,7 @@ const PLATFORM_POSTER_FALLBACK: Record<Platform, string> = {
 
 export const LibraryPage: React.FC<LibraryPageProps> = ({
   projects,
+  initialScannedProject = null,
   onOpenEditor,
   onAnalyzeStreamUrl,
   onUploadVideo,
@@ -50,8 +59,21 @@ export const LibraryPage: React.FC<LibraryPageProps> = ({
   const [isScanning, setIsScanning] = useState(false);
   const [isUploading, setIsUploading] = useState(false);
   const [scanError, setScanError] = useState<string | null>(null);
-  const [lastScannedProject, setLastScannedProject] = useState<ClipProject | null>(null);
+  const [lastScannedProject, setLastScannedProject] = useState<ClipProject | null>(
+    initialScannedProject
+  );
   const [brokenThumbs, setBrokenThumbs] = useState<Record<string, boolean>>({});
+  const [selectedMomentByProject, setSelectedMomentByProject] = useState<Record<string, string>>({});
+  const [previewTarget, setPreviewTarget] = useState<{
+    project: ClipProject;
+    moment: ViralMoment;
+  } | null>(null);
+
+  useEffect(() => {
+    if (initialScannedProject) {
+      setLastScannedProject(initialScannedProject);
+    }
+  }, [initialScannedProject]);
 
   const handleAnalyzeSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -93,6 +115,14 @@ export const LibraryPage: React.FC<LibraryPageProps> = ({
     }
   };
 
+  const getActiveCardMoment = (project: ClipProject): ViralMoment | undefined => {
+    const chosenId = selectedMomentByProject[project.id];
+    const explicit = chosenId
+      ? project.viralMoments.find((m) => m.id === chosenId)
+      : undefined;
+    return resolveSnippetForProject(project, explicit);
+  };
+
   const filteredProjects = projects.filter((p) => {
     const matchesPlatform = filterPlatform === 'all' || p.platform === filterPlatform;
     const q = searchQuery.trim().toLowerCase();
@@ -114,7 +144,7 @@ export const LibraryPage: React.FC<LibraryPageProps> = ({
               CLIPSY LIBRARY &amp; VIRAL SCANNER
             </p>
             <h1 className="mt-1.5 font-display text-3xl font-bold tracking-tight text-[var(--ink-primary)]">
-              Detect moments. Open directly in 9:16 editor.
+              Detect moments. Preview snippets. Open in 9:16 editor.
             </h1>
           </div>
 
@@ -196,17 +226,25 @@ export const LibraryPage: React.FC<LibraryPageProps> = ({
 
           {/* Freshly Scanned Viral Moments Panel */}
           {lastScannedProject && lastScannedProject.viralMoments.length > 0 && (
-            <div className="mt-6 border-t border-[var(--border-hairline)] pt-5">
+            <div
+              data-testid="scanned-moments-panel"
+              className="mt-6 border-t border-[var(--border-hairline)] pt-5"
+            >
               <div className="flex flex-wrap items-center justify-between gap-2">
                 <h3 className="text-sm font-bold text-[var(--ink-primary)]">
                   Detected moments for: {lastScannedProject.title}
                 </h3>
                 <button
                   type="button"
-                  onClick={() => onOpenEditor(lastScannedProject.id)}
+                  onClick={() =>
+                    onOpenEditor(
+                      lastScannedProject.id,
+                      resolveSnippetForProject(lastScannedProject)
+                    )
+                  }
                   className="text-xs font-semibold text-[var(--accent-text)] hover:underline cursor-pointer"
                 >
-                  Open full clip in editor →
+                  Open top snippet in editor →
                 </button>
               </div>
               <div className="mt-3 grid grid-cols-1 gap-3 md:grid-cols-3">
@@ -218,7 +256,7 @@ export const LibraryPage: React.FC<LibraryPageProps> = ({
                     <div>
                       <div className="flex items-center justify-between font-mono text-xs">
                         <span className="font-semibold text-[var(--accent-text)]">
-                          {formatTimecode(moment.startSec)} – {formatTimecode(moment.endSec)}
+                          {formatPreciseTimecode(moment.startSec)} – {formatPreciseTimecode(moment.endSec)}
                         </span>
                         <span className="text-[var(--ink-muted)]">{moment.peakMetric}</span>
                       </div>
@@ -229,13 +267,25 @@ export const LibraryPage: React.FC<LibraryPageProps> = ({
                         {moment.reason}
                       </p>
                     </div>
-                    <button
-                      type="button"
-                      onClick={() => onOpenEditor(lastScannedProject.id, moment)}
-                      className="mt-4 w-full rounded border border-[var(--border-strong)] bg-[var(--bg-surface)] py-2 text-xs font-bold text-[var(--accent-text)] hover:bg-[var(--accent)] hover:text-[var(--accent-fg)] transition-colors cursor-pointer"
-                    >
-                      Clip &amp; open in editor
-                    </button>
+                    <div className="mt-4 flex items-center gap-2">
+                      <button
+                        type="button"
+                        onClick={() =>
+                          setPreviewTarget({ project: lastScannedProject, moment })
+                        }
+                        className="inline-flex items-center justify-center gap-1.5 rounded border border-[var(--border-strong)] bg-[var(--bg-surface)] px-3 py-2 text-xs font-bold text-[var(--ink-primary)] hover:border-[var(--accent)] hover:text-[var(--accent-text)] transition-colors cursor-pointer whitespace-nowrap"
+                      >
+                        <Play className="h-3.5 w-3.5 fill-current" aria-hidden="true" />
+                        <span>Preview</span>
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => onOpenEditor(lastScannedProject.id, moment)}
+                        className="flex-1 rounded bg-[var(--accent)] py-2 text-xs font-bold text-[var(--accent-fg)] hover:bg-[var(--accent-hover)] transition-colors cursor-pointer whitespace-nowrap"
+                      >
+                        Open in editor
+                      </button>
+                    </div>
                   </div>
                 ))}
               </div>
@@ -310,10 +360,12 @@ export const LibraryPage: React.FC<LibraryPageProps> = ({
               const posterSrc = brokenThumbs[project.id]
                 ? PLATFORM_POSTER_FALLBACK[project.platform]
                 : project.thumbnailUrl || PLATFORM_POSTER_FALLBACK[project.platform];
+              const activeMoment = getActiveCardMoment(project);
 
               return (
                 <article
                   key={project.id}
+                  data-testid={`library-card-${project.id}`}
                   className="flex flex-col justify-between overflow-hidden rounded-lg border border-[var(--border-hairline)] bg-[var(--bg-surface)]"
                 >
                   <div>
@@ -328,6 +380,19 @@ export const LibraryPage: React.FC<LibraryPageProps> = ({
                         className="h-full w-full object-cover"
                       />
                       <div className="pointer-events-none absolute inset-0 bg-gradient-to-t from-black/85 via-black/15 to-transparent" />
+                      {activeMoment && (
+                        <button
+                          type="button"
+                          onClick={() =>
+                            setPreviewTarget({ project, moment: activeMoment })
+                          }
+                          aria-label={`Preview ${activeMoment.title}`}
+                          className="absolute top-2.5 right-2.5 inline-flex items-center gap-1 rounded bg-black/80 px-2.5 py-1 font-mono text-[10px] font-bold text-white border border-white/20 hover:border-[var(--accent)] hover:text-[var(--accent)] transition-colors cursor-pointer"
+                        >
+                          <Play className="h-3 w-3 fill-current" aria-hidden="true" />
+                          <span>Preview snippet</span>
+                        </button>
+                      )}
                       <div className="absolute right-3 bottom-2.5 left-3 flex items-center justify-between font-mono text-[11px] text-white">
                         <span className="truncate pr-2">{project.fileName}</span>
                         <span className="shrink-0 tabular-nums">
@@ -355,21 +420,58 @@ export const LibraryPage: React.FC<LibraryPageProps> = ({
 
                       {project.viralMoments.length > 0 && (
                         <div className="mt-4 space-y-1.5 border-t border-[var(--border-hairline)] pt-3">
-                          {project.viralMoments.slice(0, 2).map((vm) => (
-                            <button
-                              key={vm.id}
-                              type="button"
-                              onClick={() => onOpenEditor(project.id, vm)}
-                              className="flex w-full items-center justify-between rounded bg-[var(--bg-elevated)] px-2.5 py-1.5 text-left text-xs hover:opacity-90 cursor-pointer"
-                            >
-                              <span className="truncate text-[var(--ink-secondary)]">
-                                {vm.title}
-                              </span>
-                              <span className="ml-2 shrink-0 font-mono text-[11px] font-semibold text-[var(--accent-text)]">
-                                {formatTimecode(vm.startSec)}
-                              </span>
-                            </button>
-                          ))}
+                          {project.viralMoments.slice(0, 3).map((vm) => {
+                            const isSelected = activeMoment?.id === vm.id;
+                            return (
+                              <div
+                                key={vm.id}
+                                className={`flex items-center justify-between gap-1.5 rounded border px-2 py-1.5 text-xs transition-colors ${
+                                  isSelected
+                                    ? 'border-[var(--accent)] bg-[var(--accent-soft)]'
+                                    : 'border-transparent bg-[var(--bg-elevated)]'
+                                }`}
+                              >
+                                <button
+                                  type="button"
+                                  onClick={() =>
+                                    setSelectedMomentByProject((prev) => ({
+                                      ...prev,
+                                      [project.id]: vm.id,
+                                    }))
+                                  }
+                                  className="flex min-w-0 flex-1 items-center justify-between text-left cursor-pointer"
+                                >
+                                  <span
+                                    className={`truncate ${
+                                      isSelected
+                                        ? 'font-semibold text-[var(--ink-primary)]'
+                                        : 'text-[var(--ink-secondary)]'
+                                    }`}
+                                  >
+                                    {vm.title}
+                                  </span>
+                                  <span className="ml-2 shrink-0 font-mono text-[11px] font-semibold text-[var(--accent-text)] tabular-nums">
+                                    {formatTimecode(vm.startSec)}–{formatTimecode(vm.endSec)}
+                                  </span>
+                                </button>
+                                <button
+                                  type="button"
+                                  aria-label={`Preview ${vm.title}`}
+                                  title={`Preview ${vm.title}`}
+                                  onClick={() => {
+                                    setSelectedMomentByProject((prev) => ({
+                                      ...prev,
+                                      [project.id]: vm.id,
+                                    }));
+                                    setPreviewTarget({ project, moment: vm });
+                                  }}
+                                  className="inline-flex h-6 w-6 shrink-0 items-center justify-center rounded border border-[var(--border-strong)] bg-[var(--bg-surface)] text-[var(--ink-primary)] hover:border-[var(--accent)] hover:text-[var(--accent-text)] cursor-pointer"
+                                >
+                                  <Play className="h-3 w-3 fill-current" aria-hidden="true" />
+                                </button>
+                              </div>
+                            );
+                          })}
                         </div>
                       )}
                     </div>
@@ -378,17 +480,19 @@ export const LibraryPage: React.FC<LibraryPageProps> = ({
                   <div className="flex items-center gap-2 border-t border-[var(--border-hairline)] bg-[var(--bg-elevated)] px-5 py-3.5">
                     <button
                       type="button"
-                      onClick={() => onOpenEditor(project.id)}
-                      className="flex-1 rounded bg-[var(--accent)] py-2 text-xs font-bold text-[var(--accent-fg)] hover:bg-[var(--accent-hover)] cursor-pointer"
+                      onClick={() => onOpenEditor(project.id, activeMoment)}
+                      className="flex-1 rounded bg-[var(--accent)] px-3 py-2 text-xs font-bold text-[var(--accent-fg)] hover:bg-[var(--accent-hover)] cursor-pointer truncate"
                     >
-                      Open in editor
+                      {activeMoment
+                        ? `Open snippet (${formatTimecode(activeMoment.startSec)}–${formatTimecode(activeMoment.endSec)})`
+                        : 'Open in editor'}
                     </button>
                     {project.id !== 'demo-clipsy' && project.id !== 'demo-clipfast' && (
                       <button
                         type="button"
                         aria-label={`Delete ${project.title}`}
                         onClick={() => onDeleteProject(project.id)}
-                        className="inline-flex h-8 w-8 items-center justify-center rounded border border-[var(--border-strong)] text-[var(--ink-muted)] hover:border-rose-500/60 hover:text-rose-500 cursor-pointer"
+                        className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded border border-[var(--border-strong)] text-[var(--ink-muted)] hover:border-rose-500/60 hover:text-rose-500 cursor-pointer"
                       >
                         <Trash2 className="h-3.5 w-3.5" aria-hidden="true" />
                       </button>
@@ -400,6 +504,15 @@ export const LibraryPage: React.FC<LibraryPageProps> = ({
           </div>
         )}
       </div>
+
+      {previewTarget && (
+        <SnippetPreviewModal
+          project={previewTarget.project}
+          moment={previewTarget.moment}
+          onClose={() => setPreviewTarget(null)}
+          onOpenInEditor={(pid, moment) => onOpenEditor(pid, moment)}
+        />
+      )}
     </div>
   );
 };
