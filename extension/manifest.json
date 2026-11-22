@@ -1,0 +1,27 @@
+{
+  "manifest_version": 3,
+  "name": "Clipsy Live Clipper",
+  "version": "1.0.0",
+  "description": "Monitors live chat activity on Twitch, Kick, and YouTube streams to auto-capture viral moments into your Clipsy library.",
+  "permissions": ["activeTab", "storage", "scripting"],
+  "host_permissions": [
+    "https://www.twitch.tv/*",
+    "https://kick.com/*",
+    "https://www.youtube.com/*"
+  ],
+  "action": {
+    "default_popup": "popup.html",
+    "default_title": "Clipsy Live Clipper"
+  },
+  "content_scripts": [
+    {
+      "matches": [
+        "https://www.twitch.tv/*",
+        "https://kick.com/*",
+        "https://www.youtube.com/*"
+      ],
+      "js": ["content.js"],
+      "run_at": "document_idle"
+    }
+  ]
+}

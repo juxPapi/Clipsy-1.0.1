@@ -1,0 +1,42 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <title>Clipsy Live Clipper</title>
+    <style>
+      body {
+        width: 310px;
+        margin: 0;
+        padding: 16px;
+        background: #080b09;
+        color: #f4f7f5;
+        font-family: system-ui, -apple-system, sans-serif;
+      }
+      .brand { font-weight: 800; font-size: 14px; letter-spacing: 0.04em; color: #3df07a; }
+      .sub { font-size: 12px; color: #93a198; margin: 6px 0 14px; line-height: 1.4; }
+      .card { background: #111613; border: 1px solid #1d2520; border-radius: 8px; padding: 12px; margin-bottom: 12px; }
+      .stat { font-family: monospace; font-size: 12px; color: #d1dbd4; }
+      button {
+        width: 100%;
+        padding: 10px 12px;
+        border-radius: 6px;
+        border: 0;
+        font-weight: 700;
+        font-size: 13px;
+        cursor: pointer;
+      }
+      #toggleBtn { background: #3df07a; color: #052e14; margin-bottom: 8px; }
+      #reviewBtn { background: #18201b; color: #f4f7f5; border: 1px solid #28342c; }
+    </style>
+  </head>
+  <body>
+    <div class="brand">CLIPSY EXTENSION</div>
+    <div class="sub">Watches Twitch, Kick &amp; YouTube chat spikes and saves 60s before + 15s after.</div>
+    <div class="card">
+      <div class="stat" id="statusText">Idle — Open a live stream tab</div>
+    </div>
+    <button id="toggleBtn">Start auto clipping</button>
+    <button id="reviewBtn">Review clips in Library</button>
+    <script src="popup.js"></script>
+  </body>
+</html>

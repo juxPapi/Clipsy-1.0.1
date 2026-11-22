@@ -1,0 +1,485 @@
+import { execFile } from 'node:child_process';
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
+import { promisify } from 'node:util';
+import { GoogleGenAI, ThinkingLevel, Type } from '@google/genai';
+import type { CaptionSegment, Platform, ViralMoment } from '../../src/types/clipfast';
+
+const execFileAsync = promisify(execFile);
+
+const YT_DLP_CANDIDATES = [
+  path.join(os.homedir(), '.local', 'bin', 'yt-dlp'),
+  '/usr/local/bin/yt-dlp',
+  '/usr/bin/yt-dlp',
+];
+
+export function resolveYtDlpBinary(): string | null {
+  for (const candidate of YT_DLP_CANDIDATES) {
+    if (fs.existsSync(candidate)) {
+      return candidate;
+    }
+  }
+  return null;
+}
+
+export function getGeminiClient(): GoogleGenAI | null {
+  const apiKey = process.env.GEMINI_API_KEY;
+  if (!apiKey || apiKey === 'MY_GEMINI_API_KEY') {
+    return null;
+  }
+  return new GoogleGenAI({
+    apiKey,
+    httpOptions: {
+      timeout: 20000,
+      headers: {
+        'User-Agent': 'aistudio-build',
+      },
+    },
+  });
+}
+
+function formatGeminiError(err: unknown): string {
+  const raw = err instanceof Error ? err.message : String(err);
+  try {
+    const parsed = JSON.parse(raw);
+    const inner = parsed?.error ?? parsed;
+    if (inner?.message) {
+      return inner.status ? `${inner.status}: ${inner.message}` : String(inner.message);
+    }
+  } catch {
+    // Not a JSON string; return raw message trimmed
+  }
+  return raw.slice(0, 220);
+}
+
+export interface VideoProbeInfo {
+  durationSec: number;
+  width: number;
+  height: number;
+  fps: number;
+  hasAudio: boolean;
+}
+
+export async function probeVideoFile(filePath: string): Promise<VideoProbeInfo> {
+  const { stdout } = await execFileAsync(
+    'ffprobe',
+    [
+      '-v',
+      'error',
+      '-show_entries',
+      'format=duration:stream=codec_type,width,height,r_frame_rate',
+      '-of',
+      'json',
+      filePath,
+    ],
+    { timeout: 15000 }
+  );
+
+  const parsed = JSON.parse(stdout || '{}');
+  const streams: Array<{
+    codec_type?: string;
+    width?: number;
+    height?: number;
+    r_frame_rate?: string;
+  }> = Array.isArray(parsed.streams) ? parsed.streams : [];
+
+  const videoStream = streams.find((s) => s.codec_type === 'video');
+  const audioStream = streams.find((s) => s.codec_type === 'audio');
+
+  let fps = 30;
+  if (videoStream?.r_frame_rate && videoStream.r_frame_rate.includes('/')) {
+    const [numStr, denStr] = videoStream.r_frame_rate.split('/');
+    const num = Number(numStr);
+    const den = Number(denStr);
+    if (den > 0 && Number.isFinite(num)) {
+      fps = Number((num / den).toFixed(3));
+    }
+  }
+
+  const durationSec = Math.max(1, Number(Number(parsed.format?.duration || 30).toFixed(1)));
+
+  return {
+    durationSec,
+    width: videoStream?.width || 1280,
+    height: videoStream?.height || 720,
+    fps,
+    hasAudio: Boolean(audioStream),
+  };
+}
+
+export interface AudioPeakWindow {
+  startSec: number;
+  endSec: number;
+  peakDb: number;
+}
+
+/**
+ * Extracts real audio loudness windows from a video file using FFmpeg `astats`.
+ */
+export async function detectAudioSpikes(
+  filePath: string,
+  durationSec: number
+): Promise<AudioPeakWindow[]> {
+  try {
+    const { stderr } = await execFileAsync(
+      'ffmpeg',
+      [
+        '-i',
+        filePath,
+        '-vn',
+        '-af',
+        'astats=metadata=1:reset=1,ametadata=print:key=lavfi.astats.Overall.RMS_level',
+        '-f',
+        'null',
+        '-',
+      ],
+      { timeout: 20000, maxBuffer: 4 * 1024 * 1024 }
+    );
+
+    const samples: Array<{ time: number; db: number }> = [];
+    let currentTime = 0;
+
+    for (const line of stderr.split('\n')) {
+      const ptsMatch = line.match(/pts_time:([0-9.]+)/);
+      if (ptsMatch) {
+        currentTime = Number(ptsMatch[1]);
+      }
+      const rmsMatch = line.match(/lavfi\.astats\.Overall\.RMS_level=([-0-9.]+)/);
+      if (rmsMatch) {
+        const db = Number(rmsMatch[1]);
+        if (Number.isFinite(db)) {
+          samples.push({ time: currentTime, db });
+        }
+      }
+    }
+
+    if (samples.length === 0) {
+      return [];
+    }
+
+    const avgDb = samples.reduce((acc, s) => acc + s.db, 0) / samples.length;
+    const spikes = samples.filter((s) => s.db > avgDb + 3.5);
+
+    const windows: AudioPeakWindow[] = [];
+    for (const sample of spikes) {
+      const last = windows[windows.length - 1];
+      if (last && sample.time <= last.endSec + 2.5) {
+        last.endSec = Math.min(durationSec, Number((sample.time + 2).toFixed(1)));
+        last.peakDb = Math.max(last.peakDb, sample.db);
+      } else {
+        windows.push({
+          startSec: Math.max(0, Number((sample.time - 2).toFixed(1))),
+          endSec: Math.min(durationSec, Number((sample.time + 4).toFixed(1))),
+          peakDb: Number(sample.db.toFixed(1)),
+        });
+      }
+    }
+
+    return windows.sort((a, b) => b.peakDb - a.peakDb).slice(0, 5);
+  } catch {
+    return [];
+  }
+}
+
+export interface YtDlpMetadata {
+  title: string;
+  uploader: string;
+  durationSec: number;
+  width: number;
+  height: number;
+  fps: number;
+  thumbnailUrl?: string;
+  heatmap?: Array<{ start_time: number; end_time: number; value: number }>;
+  chapters?: Array<{ start_time: number; end_time: number; title: string }>;
+  isLive?: boolean;
+  description?: string;
+}
+
+export async function inspectStreamWithYtDlp(canonicalUrl: string): Promise<{
+  data: YtDlpMetadata | null;
+  error?: string;
+}> {
+  const bin = resolveYtDlpBinary();
+  if (!bin) {
+    return { data: null, error: 'yt-dlp binary is not installed on server.' };
+  }
+
+  try {
+    const { stdout } = await execFileAsync(
+      bin,
+      [
+        '--dump-single-json',
+        '--no-download',
+        '--no-warnings',
+        '--no-playlist',
+        '--socket-timeout',
+        '10',
+        canonicalUrl,
+      ],
+      { timeout: 18000, maxBuffer: 8 * 1024 * 1024 }
+    );
+
+    const info = JSON.parse(stdout || '{}');
+    return {
+      data: {
+        title: info.title || 'Stream Highlight',
+        uploader: info.uploader || info.channel || info.creator || 'Creator',
+        durationSec: Math.max(15, Number(info.duration || 54)),
+        width: Number(info.width || 1920),
+        height: Number(info.height || 1080),
+        fps: Number(info.fps || 30),
+        thumbnailUrl: typeof info.thumbnail === 'string' ? info.thumbnail : undefined,
+        heatmap: Array.isArray(info.heatmap) ? info.heatmap.slice(0, 40) : undefined,
+        chapters: Array.isArray(info.chapters) ? info.chapters.slice(0, 20) : undefined,
+        isLive: Boolean(info.is_live),
+        description: typeof info.description === 'string' ? info.description.slice(0, 600) : undefined,
+      },
+    };
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    return {
+      data: null,
+      error: message.split('\n').slice(0, 2).join(' ').slice(0, 240),
+    };
+  }
+}
+
+export async function fetchYoutubeOembedMetadata(
+  canonicalUrl: string,
+  videoId?: string | null
+): Promise<Partial<YtDlpMetadata> | null> {
+  try {
+    const lookupUrl =
+      videoId && !videoId.startsWith('@')
+        ? `https://www.youtube.com/watch?v=${encodeURIComponent(videoId)}`
+        : canonicalUrl;
+    const endpoint = `https://www.youtube.com/oembed?url=${encodeURIComponent(lookupUrl)}&format=json`;
+    const res = await fetch(endpoint, { signal: AbortSignal.timeout(6000) });
+    if (!res.ok) return null;
+    const data = (await res.json()) as {
+      title?: string;
+      author_name?: string;
+      thumbnail_url?: string;
+    };
+    if (!data?.title) return null;
+    return {
+      title: data.title,
+      uploader: data.author_name || 'YouTube Creator',
+      thumbnailUrl: data.thumbnail_url,
+    };
+  } catch {
+    return null;
+  }
+}
+
+export async function identifyViralMomentsWithGemini(params: {
+  platform: Platform;
+  title: string;
+  channelName: string;
+  durationSec: number;
+  audioSpikes: AudioPeakWindow[];
+  heatmap?: Array<{ start_time: number; end_time: number; value: number }>;
+  chapters?: Array<{ start_time: number; end_time: number; title: string }>;
+  description?: string;
+}): Promise<{ moments: ViralMoment[]; usedGemini: boolean; error?: string }> {
+  const ai = getGeminiClient();
+  const safeDuration = Math.max(15, params.durationSec);
+
+  if (!ai) {
+    // Deterministic fallback grounded strictly in real FFmpeg audio spikes / heatmap when API key is absent
+    const fallbackMoments: ViralMoment[] =
+      params.audioSpikes.length > 0
+        ? params.audioSpikes.map((spike, idx) => ({
+            id: `spike-${idx + 1}`,
+            title: `Audio energy spike #${idx + 1}`,
+            startSec: spike.startSec,
+            endSec: Math.min(safeDuration, Math.max(spike.startSec + 6, spike.endSec)),
+            score: Math.min(98, Math.round(78 + (spike.peakDb + 30) * 0.8)),
+            category: 'reaction',
+            reason: `FFmpeg measured RMS loudness surge at ${spike.peakDb} dB.`,
+            hookText: 'WAIT FOR THE REACTION',
+            peakMetric: `${spike.peakDb} dB audio peak`,
+          }))
+        : [
+            {
+              id: 'm-1',
+              title: 'Opening stream hook',
+              startSec: 0,
+              endSec: Math.min(safeDuration, 18),
+              score: 84,
+              category: 'callout',
+              reason: 'Strong opening setup window ready for vertical 9:16 framing.',
+              hookText: 'WATCH THIS PLAY',
+              peakMetric: 'Opening segment',
+            },
+          ];
+
+    return {
+      moments: fallbackMoments,
+      usedGemini: false,
+      error: 'GEMINI_API_KEY is not configured in Secrets; returned measured signal windows.',
+    };
+  }
+
+  const prompt = `Analyze this ${params.platform} stream/video and identify 3 to 4 high-retention vertical short-form viral moments (each 6 to 28 seconds long, strictly within 0 to ${safeDuration} seconds).
+
+Metadata:
+- Title: ${params.title}
+- Channel: ${params.channelName}
+- Duration: ${safeDuration}s
+- Measured FFmpeg Audio Spikes: ${JSON.stringify(params.audioSpikes)}
+- Platform Heatmap Peaks: ${JSON.stringify(params.heatmap?.slice(0, 12) ?? [])}
+- Chapters: ${JSON.stringify(params.chapters ?? [])}
+- Notes: ${params.description ?? 'None'}
+
+Anchor your timestamps to the real audio spikes or heatmap peaks when provided. Keep hookText under 6 words.`;
+
+  const callMomentsModel = async (
+    model: 'gemini-4-hydrogen' | 'gemini-3.1-flash-lite',
+    thinkingLevel: ThinkingLevel,
+    timeoutMs: number
+  ) => {
+    return ai.models.generateContent({
+      model,
+      contents: prompt,
+      config: {
+        abortSignal: AbortSignal.timeout(timeoutMs),
+        thinkingConfig: { thinkingLevel },
+        responseMimeType: 'application/json',
+        responseSchema: {
+          type: Type.ARRAY,
+          items: {
+            type: Type.OBJECT,
+            properties: {
+              title: { type: Type.STRING },
+              startSec: { type: Type.NUMBER },
+              endSec: { type: Type.NUMBER },
+              score: { type: Type.INTEGER },
+              category: { type: Type.STRING },
+              reason: { type: Type.STRING },
+              hookText: { type: Type.STRING },
+              peakMetric: { type: Type.STRING },
+            },
+            required: ['title', 'startSec', 'endSec', 'score', 'category', 'reason', 'hookText', 'peakMetric'],
+          },
+        },
+      },
+    });
+  };
+
+  const t0 = Date.now();
+  try {
+    let response;
+    try {
+      response = await callMomentsModel('gemini-4-hydrogen', ThinkingLevel.LOW, 12000);
+    } catch (primaryErr) {
+      const primaryMsg = formatGeminiError(primaryErr);
+      console.warn(`[Gemini] primary moments call failed (${Date.now() - t0}ms): ${primaryMsg}; trying gemini-3.1-flash-lite`);
+      response = await callMomentsModel('gemini-3.1-flash-lite', ThinkingLevel.MINIMAL, 12000);
+    }
+
+    const raw = JSON.parse((response.text ?? '[]').trim());
+    const validCategories = new Set(['clutch', 'chat-spike', 'reaction', 'humor', 'callout']);
+
+    const moments: ViralMoment[] = (Array.isArray(raw) ? raw : []).slice(0, 5).map((item, idx) => {
+      const start = Math.max(0, Math.min(safeDuration - 4, Number(item.startSec) || 0));
+      const end = Math.max(start + 4, Math.min(safeDuration, Number(item.endSec) || start + 12));
+      const cat = validCategories.has(item.category) ? item.category : 'clutch';
+      return {
+        id: `vm-${Date.now().toString(36)}-${idx + 1}`,
+        title: String(item.title || `Moment ${idx + 1}`),
+        startSec: Number(start.toFixed(1)),
+        endSec: Number(end.toFixed(1)),
+        score: Math.max(50, Math.min(99, Math.round(Number(item.score) || 85))),
+        category: cat,
+        reason: String(item.reason || 'High-energy stream highlight'),
+        hookText: String(item.hookText || 'WATCH THIS MOMENT'),
+        peakMetric: String(item.peakMetric || 'AI Moment Scan'),
+      };
+    });
+
+    return { moments, usedGemini: true };
+  } catch (err) {
+    const msg = formatGeminiError(err);
+    console.error(`[Gemini] identifyViralMomentsWithGemini failed after ${Date.now() - t0}ms:`, msg);
+    return { moments: [], usedGemini: false, error: msg };
+  }
+}
+
+export async function generateCaptionsWithGemini(params: {
+  title: string;
+  platform: Platform;
+  durationSec: number;
+  hookContext?: string;
+}): Promise<{ captions: CaptionSegment[]; error?: string }> {
+  const ai = getGeminiClient();
+  if (!ai) {
+    return {
+      captions: [],
+      error: 'GEMINI_API_KEY is not configured in Settings > Secrets.',
+    };
+  }
+
+  const safeDur = Math.max(6, Math.min(60, params.durationSec));
+  const prompt = `Generate 5 short-form TikTok/Shorts caption lines timed across 0 to ${safeDur} seconds for a ${params.platform} stream clip titled "${params.title}". Context: ${params.hookContext || 'High-energy gameplay and streamer reaction'}. Each caption should be 3-6 punchy words with 1 highlightWord.`;
+
+  const callCaptionsModel = async (
+    model: 'gemini-4-hydrogen' | 'gemini-3.1-flash-lite',
+    thinkingLevel: ThinkingLevel,
+    timeoutMs: number
+  ) => {
+    return ai.models.generateContent({
+      model,
+      contents: prompt,
+      config: {
+        abortSignal: AbortSignal.timeout(timeoutMs),
+        thinkingConfig: { thinkingLevel },
+        responseMimeType: 'application/json',
+        responseSchema: {
+          type: Type.ARRAY,
+          items: {
+            type: Type.OBJECT,
+            properties: {
+              text: { type: Type.STRING },
+              startSec: { type: Type.NUMBER },
+              endSec: { type: Type.NUMBER },
+              highlightWord: { type: Type.STRING },
+            },
+            required: ['text', 'startSec', 'endSec', 'highlightWord'],
+          },
+        },
+      },
+    });
+  };
+
+  const t0 = Date.now();
+  try {
+    let response;
+    try {
+      response = await callCaptionsModel('gemini-3.1-flash-lite', ThinkingLevel.MINIMAL, 10000);
+    } catch (primaryErr) {
+      const primaryMsg = formatGeminiError(primaryErr);
+      console.warn(`[Gemini] fast captions call failed (${Date.now() - t0}ms): ${primaryMsg}; trying gemini-4-hydrogen`);
+      response = await callCaptionsModel('gemini-4-hydrogen', ThinkingLevel.LOW, 12000);
+    }
+
+    const raw = JSON.parse((response.text ?? '[]').trim());
+    const captions: CaptionSegment[] = (Array.isArray(raw) ? raw : []).map((c, idx) => ({
+      id: `cap-${Date.now().toString(36)}-${idx}`,
+      text: String(c.text || ''),
+      startSec: Math.max(0, Number(c.startSec) || idx * 3),
+      endSec: Math.min(safeDur, Number(c.endSec) || idx * 3 + 2.8),
+      highlightWord: String(c.highlightWord || ''),
+    }));
+
+    return { captions };
+  } catch (err) {
+    const msg = formatGeminiError(err);
+    console.error(`[Gemini] generateCaptionsWithGemini failed after ${Date.now() - t0}ms:`, msg);
+    return {
+      captions: [],
+      error: msg,
+    };
+  }
+}

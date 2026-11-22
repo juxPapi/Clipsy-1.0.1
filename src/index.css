@@ -1,0 +1,173 @@
+@import "tailwindcss";
+@custom-variant dark (&:where(.dark, .dark *));
+
+@layer base {
+  :root {
+    --bg-canvas: #f5f7f6;
+    --bg-surface: #ffffff;
+    --bg-elevated: #ebefec;
+    --bg-stage: #111613;
+    --border-hairline: #dce3df;
+    --border-strong: #c2cdc6;
+    --ink-primary: #0c1410;
+    --ink-secondary: #2c3b32;
+    --ink-muted: #58685e;
+    --dot-bg: #eef2ef;
+    --dot-color: rgba(12, 24, 17, 0.11);
+
+    --accent: #3df07a;
+    --accent-hover: #2bd966;
+    --accent-fg: #04210e;
+    --accent-text: #15803d;
+    --accent-soft: rgba(22, 163, 74, 0.1);
+  }
+
+  .dark {
+    --bg-canvas: #050706;
+    --bg-surface: #0a0e0b;
+    --bg-elevated: #111613;
+    --bg-stage: #050706;
+    --border-hairline: #1c241f;
+    --border-strong: #29362e;
+    --ink-primary: #f4f7f5;
+    --ink-secondary: #d3ded7;
+    --ink-muted: #93a198;
+    --dot-bg: #080b09;
+    --dot-color: rgba(148, 163, 157, 0.16);
+
+    --accent: #3df07a;
+    --accent-hover: #54f58c;
+    --accent-fg: #04210e;
+    --accent-text: #3df07a;
+    --accent-soft: rgba(61, 240, 122, 0.14);
+  }
+
+  /* Accent Palettes */
+  [data-accent="volt"] {
+    --accent: #3df07a;
+    --accent-hover: #2bd966;
+    --accent-fg: #04210e;
+    --accent-text: #15803d;
+    --accent-soft: rgba(22, 163, 74, 0.11);
+  }
+  .dark[data-accent="volt"] {
+    --accent: #3df07a;
+    --accent-hover: #54f58c;
+    --accent-fg: #04210e;
+    --accent-text: #3df07a;
+    --accent-soft: rgba(61, 240, 122, 0.14);
+  }
+
+  [data-accent="blue"] {
+    --accent: #2563eb;
+    --accent-hover: #1d4ed8;
+    --accent-fg: #ffffff;
+    --accent-text: #1d4ed8;
+    --accent-soft: rgba(37, 99, 235, 0.11);
+  }
+  .dark[data-accent="blue"] {
+    --accent: #3b82f6;
+    --accent-hover: #60a5fa;
+    --accent-fg: #ffffff;
+    --accent-text: #60a5fa;
+    --accent-soft: rgba(59, 130, 246, 0.16);
+  }
+
+  [data-accent="amber"] {
+    --accent: #f59e0b;
+    --accent-hover: #d97706;
+    --accent-fg: #1c1002;
+    --accent-text: #b45309;
+    --accent-soft: rgba(217, 119, 6, 0.11);
+  }
+  .dark[data-accent="amber"] {
+    --accent: #f59e0b;
+    --accent-hover: #fbbf24;
+    --accent-fg: #1c1002;
+    --accent-text: #fbbf24;
+    --accent-soft: rgba(245, 158, 11, 0.16);
+  }
+
+  [data-accent="rose"] {
+    --accent: #e11d48;
+    --accent-hover: #be123c;
+    --accent-fg: #ffffff;
+    --accent-text: #be123c;
+    --accent-soft: rgba(225, 29, 72, 0.1);
+  }
+  .dark[data-accent="rose"] {
+    --accent: #f43f5e;
+    --accent-hover: #fb7185;
+    --accent-fg: #ffffff;
+    --accent-text: #fb7185;
+    --accent-soft: rgba(244, 63, 94, 0.16);
+  }
+
+  [data-accent="violet"] {
+    --accent: #7c3aed;
+    --accent-hover: #6d28d9;
+    --accent-fg: #ffffff;
+    --accent-text: #6d28d9;
+    --accent-soft: rgba(124, 58, 237, 0.1);
+  }
+  .dark[data-accent="violet"] {
+    --accent: #8b5cf6;
+    --accent-hover: #a78bfa;
+    --accent-fg: #ffffff;
+    --accent-text: #a78bfa;
+    --accent-soft: rgba(139, 92, 246, 0.16);
+  }
+
+  body {
+    font-family: "DM Sans", -apple-system, BlinkMacSystemFont, sans-serif;
+    background-color: var(--bg-canvas);
+    color: var(--ink-primary);
+    transition: background-color 180ms cubic-bezier(0.16, 1, 0.3, 1), color 180ms cubic-bezier(0.16, 1, 0.3, 1);
+  }
+
+  h1,
+  h2,
+  h3,
+  .font-display {
+    font-family: "Plus Jakarta Sans", "DM Sans", sans-serif;
+  }
+
+  .font-mono,
+  .tabular-nums {
+    font-family: "JetBrains Mono", ui-monospace, SFMono-Regular, monospace;
+    font-variant-numeric: tabular-nums;
+  }
+}
+
+.dot-grid-surface {
+  background-color: var(--dot-bg);
+  background-image: radial-gradient(var(--dot-color) 1px, transparent 1px);
+  background-size: 16px 16px;
+}
+
+::-webkit-scrollbar {
+  width: 7px;
+  height: 7px;
+}
+
+::-webkit-scrollbar-track {
+  background: var(--bg-surface);
+}
+
+::-webkit-scrollbar-thumb {
+  background: var(--border-strong);
+  border-radius: 4px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: var(--ink-muted);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    transition-duration: 0.01ms !important;
+  }
+}
