@@ -14,10 +14,10 @@ import {
   UserCircle,
   Volume2,
 } from 'lucide-react';
-import type { ClipProject, LayoutMode } from '../types/clipfast';
+import type { ClipProject, LayoutMode } from '../types/clipsycut';
 import { parseStreamUrl } from '../utils/editorLogic';
 import type { AppRoute } from './Navbar';
-import { ClipsyLogo } from './Navbar';
+import { ClipsyCutLogo } from './Navbar';
 
 interface HomePageProps {
   onNavigate: (route: AppRoute, projectId?: string) => void;
@@ -33,15 +33,15 @@ const POSTER_SHOWDOWN_IMG = '/src/assets/images/gaming_poster_showdown_179537187
 const FAQ_ITEMS = [
   {
     q: 'How does automatic viral moment detection work?',
-    a: 'Paste any YouTube, Kick, or Twitch stream, VOD, or clip URL—or upload a video file. Clipsy inspects stream metadata, platform replay heatmaps, FFmpeg audio energy surges, and Gemini AI hook scoring to pinpoint the exact start and end timestamps worth clipping.',
+    a: 'Paste any YouTube, Kick, or Twitch stream, VOD, or clip URL—or upload a video file. ClipsyCut inspects stream metadata, platform replay heatmaps, FFmpeg audio energy surges, and Gemini AI hook scoring to pinpoint the exact start and end timestamps worth clipping.',
   },
   {
     q: 'How does the Live Clipping Chrome extension capture moments?',
-    a: 'While you watch a live Twitch, Kick, or YouTube stream with chat open, the Clipsy extension tracks the baseline message rate and automatically buffers 60 seconds before and 15 seconds after any sudden chat-velocity spike.',
+    a: 'While you watch a live Twitch, Kick, or YouTube stream with chat open, the ClipsyCut extension tracks the baseline message rate and automatically buffers 60 seconds before and 15 seconds after any sudden chat-velocity spike.',
   },
   {
     q: 'Can I frame gameplay and facecam separately for 9:16?',
-    a: 'Yes. The Clipsy editor provides independent draggable and resizable Gameplay and Facecam crop boxes over your 16:9 source, with Split screen, Round facecam, Small facecam, and Fullscreen 9:16 presets.',
+    a: 'Yes. The ClipsyCut editor provides independent draggable and resizable Gameplay and Facecam crop boxes over your 16:9 source, with Split screen, Round facecam, Small facecam, and Fullscreen 9:16 presets.',
   },
   {
     q: 'What quality presets does Export Short support?',
@@ -489,7 +489,7 @@ export const HomePage: React.FC<HomePageProps> = ({ onNavigate, onAnalyzeStreamU
                 />
                 <div className="pointer-events-none absolute inset-0 bg-gradient-to-t from-black/85 via-black/25 to-transparent" />
                 <div className="absolute right-3 bottom-2.5 left-3 flex items-center justify-between text-xs text-white">
-                  <span className="font-mono font-semibold">Clipsy_Short.mp4</span>
+                  <span className="font-mono font-semibold">ClipsyCut_Short.mp4</span>
                   <span className="font-mono text-[#3df07a]">1080p60</span>
                 </div>
               </div>
@@ -579,7 +579,7 @@ export const HomePage: React.FC<HomePageProps> = ({ onNavigate, onAnalyzeStreamU
                 Never miss a live chat spike on Twitch, Kick, or YouTube.
               </h2>
               <p className="mt-2 max-w-xl text-sm text-[var(--ink-muted)]">
-                Download the unpacked Clipsy Chrome extension bundle or run the interactive live chat-spike monitor right in your browser.
+                Download the unpacked ClipsyCut Chrome extension bundle or run the interactive live chat-spike monitor right in your browser.
               </p>
             </div>
             <button
@@ -636,8 +636,8 @@ export const HomePage: React.FC<HomePageProps> = ({ onNavigate, onAnalyzeStreamU
       <footer className="border-t border-[var(--border-hairline)] bg-[var(--bg-surface)]">
         <div className="mx-auto flex max-w-[1200px] flex-col items-start justify-between gap-6 px-6 py-10 sm:flex-row sm:items-center">
           <div className="flex items-center gap-2.5">
-            <ClipsyLogo size={20} />
-            <span className="font-display text-sm font-bold text-[var(--ink-primary)]">CLIPSY</span>
+            <ClipsyCutLogo size={20} />
+            <span className="font-display text-sm font-bold text-[var(--ink-primary)]">CLIPSYCUT</span>
             <span className="text-xs text-[var(--ink-muted)]">
               · YouTube, Kick &amp; Twitch 9:16 clip studio
             </span>

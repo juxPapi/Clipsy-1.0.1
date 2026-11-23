@@ -1,6 +1,6 @@
 import React from 'react';
 import { ArrowUpRight } from 'lucide-react';
-import type { AccentPaletteId, ThemeMode } from '../types/clipfast';
+import type { AccentPaletteId, ThemeMode } from '../types/clipsycut';
 import { ThemeControl } from './ThemeControl';
 
 export type AppRoute = 'home' | 'library' | 'editor' | 'live-clipping';
@@ -15,9 +15,9 @@ interface NavbarProps {
 }
 
 /**
- * Distinct Clipsy studio brand mark: chamfered 9:16 crop frame with a diagonal cut-notch and play prism.
+ * Distinct ClipsyCut studio brand mark: chamfered 9:16 crop frame with a diagonal cut-notch and play prism.
  */
-export const ClipsyLogo: React.FC<{ size?: number }> = ({ size = 24 }) => (
+export const ClipsyCutLogo: React.FC<{ size?: number }> = ({ size = 24 }) => (
   <svg
     width={size}
     height={size}
@@ -77,9 +77,9 @@ export const Navbar: React.FC<NavbarProps> = ({
           onClick={() => onNavigate('home')}
           className="flex items-center gap-2.5 text-left whitespace-nowrap shrink-0 cursor-pointer focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-[var(--accent)]"
         >
-          <ClipsyLogo size={24} />
+          <ClipsyCutLogo size={24} />
           <span className="font-display text-lg font-extrabold tracking-tight text-[var(--ink-primary)]">
-            CLIPSY
+            CLIPSYCUT
           </span>
         </button>
 

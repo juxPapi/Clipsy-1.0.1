@@ -1,25 +1,31 @@
 import React, { useEffect, useRef, useState } from 'react';
 import {
+  AlertTriangle,
   ArrowUpRight,
+  Loader2,
   Pause,
   Play,
+  RefreshCw,
   Repeat,
   VideoOff,
   Volume2,
   VolumeX,
   X,
 } from 'lucide-react';
-import type { ClipProject, ViralMoment } from '../types/clipfast';
+import type { ClipProject, ViralMoment } from '../types/clipsycut';
 import {
   computeSnippetPreviewProgress,
   formatPreciseTimecode,
+  isHlsUrl,
 } from '../utils/editorLogic';
+import { useHlsVideo } from '../hooks/useHlsVideo';
 
 interface SnippetPreviewModalProps {
   project: ClipProject;
   moment: ViralMoment;
   onClose: () => void;
   onOpenInEditor: (projectId: string, moment: ViralMoment) => void;
+  onRepairMedia?: (projectId: string) => Promise<ClipProject | null>;
 }
 
 export const SnippetPreviewModal: React.FC<SnippetPreviewModalProps> = ({
@@ -27,13 +33,27 @@ export const SnippetPreviewModal: React.FC<SnippetPreviewModalProps> = ({
   moment,
   onClose,
   onOpenInEditor,
+  onRepairMedia,
 }) => {
   const videoRef = useRef<HTMLVideoElement>(null);
   const [isPlaying, setIsPlaying] = useState(false);
   const [isMuted, setIsMuted] = useState(false);
   const [isLooping, setIsLooping] = useState(true);
   const [currentSourceSec, setCurrentSourceSec] = useState(moment.startSec);
-  const hasVideo = Boolean(project.videoUrl && project.videoUrl.trim());
+  const [mediaError, setMediaError] = useState<string | null>(null);
+  const [isLoading, setIsLoading] = useState(Boolean(project.videoUrl));
+  const [isRepairing, setIsRepairing] = useState(false);
+  const [resolvedProject, setResolvedProject] = useState<ClipProject>(project);
+  const sourceUrl = resolvedProject.videoUrl;
+  const hasVideo = Boolean(sourceUrl && sourceUrl.trim());
+  const hlsError = useHlsVideo(videoRef, hasVideo ? sourceUrl : undefined);
+  const playbackError = hlsError || mediaError;
+
+  useEffect(() => {
+    setResolvedProject(project);
+    setMediaError(null);
+    setIsLoading(Boolean(project.videoUrl));
+  }, [project]);
 
   const progress = computeSnippetPreviewProgress(
     currentSourceSec,
@@ -52,13 +72,48 @@ export const SnippetPreviewModal: React.FC<SnippetPreviewModalProps> = ({
   const handleLoadedMetadata = async () => {
     const video = videoRef.current;
     if (!video) return;
-    video.currentTime = moment.startSec;
+    setIsLoading(false);
+    // Seek after metadata so the browser does not ignore the assignment.
+    try {
+      video.currentTime = moment.startSec;
+    } catch {
+      // Some HLS live edges reject seeks; playback still starts below.
+    }
     setCurrentSourceSec(moment.startSec);
     try {
       await video.play();
       setIsPlaying(true);
     } catch {
+      // Autoplay can be blocked; the user can press play.
       setIsPlaying(false);
+    }
+  };
+
+  const handleVideoError = () => {
+    setIsLoading(false);
+    setIsPlaying(false);
+    setMediaError(
+      'This video could not be loaded. The stream link may have expired, or the file may be incomplete.'
+    );
+  };
+
+  const handleRepair = async () => {
+    if (!onRepairMedia || isRepairing) return;
+    setIsRepairing(true);
+    setMediaError(null);
+    setIsLoading(true);
+    const repaired = await onRepairMedia(project.id);
+    setIsRepairing(false);
+    if (!repaired) {
+      setMediaError('Repair failed. Upload a local recording instead.');
+      setIsLoading(false);
+      return;
+    }
+    setResolvedProject(repaired);
+    const video = videoRef.current;
+    if (video && repaired.videoUrl && !isHlsUrl(repaired.videoUrl)) {
+      video.src = repaired.videoUrl;
+      video.load();
     }
   };
 
@@ -161,14 +216,59 @@ export const SnippetPreviewModal: React.FC<SnippetPreviewModalProps> = ({
         <div className="relative aspect-video w-full bg-[var(--bg-stage)]">
           <video
             ref={videoRef}
-            src={project.videoUrl || undefined}
+            src={
+              hasVideo && !isHlsUrl(sourceUrl) ? sourceUrl : undefined
+            }
             playsInline
             muted={isMuted}
             onLoadedMetadata={handleLoadedMetadata}
             onTimeUpdate={handleTimeUpdate}
+            onWaiting={() => setIsLoading(true)}
+            onCanPlay={() => setIsLoading(false)}
+            onPlaying={() => {
+              setIsPlaying(true);
+              setIsLoading(false);
+            }}
+            onError={handleVideoError}
             onEnded={() => setIsPlaying(false)}
             className="h-full w-full object-contain"
           />
+
+          {isLoading && hasVideo && !playbackError && (
+            <div className="pointer-events-none absolute inset-0 flex items-center justify-center bg-black/40">
+              <span className="inline-flex items-center gap-2 rounded-full bg-black/70 px-3 py-1.5 font-mono text-[11px] font-semibold text-white">
+                <Loader2 className="h-3.5 w-3.5 animate-spin" aria-hidden="true" />
+                Loading stream media…
+              </span>
+            </div>
+          )}
+
+          {playbackError && hasVideo && (
+            <div className="absolute inset-0 flex flex-col items-center justify-center gap-2 bg-black/90 px-6 text-center">
+              <AlertTriangle className="h-7 w-7 text-amber-400" aria-hidden="true" />
+              <p className="font-mono text-[11px] font-bold tracking-wider text-white">
+                SOURCE VIDEO COULD NOT PLAY
+              </p>
+              <p className="max-w-[360px] text-[11px] leading-relaxed text-white/70">
+                {playbackError}
+              </p>
+              {onRepairMedia && (
+                <button
+                  type="button"
+                  onClick={handleRepair}
+                  disabled={isRepairing}
+                  className="mt-1 inline-flex items-center gap-1.5 rounded-md bg-[var(--accent)] px-3 py-1.5 text-[11px] font-bold text-[var(--accent-fg)] hover:bg-[var(--accent-hover)] cursor-pointer disabled:opacity-60"
+                >
+                  {isRepairing ? (
+                    <Loader2 className="h-3 w-3 animate-spin" aria-hidden="true" />
+                  ) : (
+                    <RefreshCw className="h-3 w-3" aria-hidden="true" />
+                  )}
+                  {isRepairing ? 'Downloading stream…' : 'Repair media'}
+                </button>
+              )}
+            </div>
+          )}
 
           {!hasVideo && (
             <div className="absolute inset-0 flex flex-col items-center justify-center gap-2 bg-black/90 px-6 text-center">
@@ -177,8 +277,24 @@ export const SnippetPreviewModal: React.FC<SnippetPreviewModalProps> = ({
                 NO SOURCE VIDEO LOADED
               </p>
               <p className="max-w-[320px] text-[11px] leading-relaxed text-white/60">
-                This project has no playable stream media. Scan a stream with media access or upload a local recording in the editor.
+                This project has no playable stream media yet. Repair media will
+                download the original stream, or upload a local recording in the editor.
               </p>
+              {onRepairMedia && resolvedProject.sourceUrl && (
+                <button
+                  type="button"
+                  onClick={handleRepair}
+                  disabled={isRepairing}
+                  className="mt-1 inline-flex items-center gap-1.5 rounded-md bg-[var(--accent)] px-3 py-1.5 text-[11px] font-bold text-[var(--accent-fg)] hover:bg-[var(--accent-hover)] cursor-pointer disabled:opacity-60"
+                >
+                  {isRepairing ? (
+                    <Loader2 className="h-3 w-3 animate-spin" aria-hidden="true" />
+                  ) : (
+                    <RefreshCw className="h-3 w-3" aria-hidden="true" />
+                  )}
+                  {isRepairing ? 'Downloading stream…' : 'Download source video'}
+                </button>
+              )}
             </div>
           )}
 

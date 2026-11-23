@@ -1,6 +1,6 @@
 import React, { useRef } from 'react';
 import { ChevronLeft, ChevronRight, RotateCcw, Scissors } from 'lucide-react';
-import type { ViralMoment } from '../../types/clipfast';
+import type { ViralMoment } from '../../types/clipsycut';
 import {
   clampMomentRange,
   formatPreciseTimecode,

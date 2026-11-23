@@ -19,7 +19,7 @@ import type {
   TextOverlay,
   VideoEffect,
   ViralMoment,
-} from '../../types/clipfast';
+} from '../../types/clipsycut';
 import { formatPreciseTimecode, formatTimecode } from '../../utils/editorLogic';
 
 interface ToolsSidebarProps {
@@ -166,7 +166,7 @@ export const ToolsSidebar: React.FC<ToolsSidebarProps> = ({
       <div className="flex w-[320px] flex-col overflow-y-auto p-5">
         <div className="border-b border-[var(--border-hairline)] pb-4">
           <div className="font-mono text-[11px] font-bold tracking-wider text-[var(--accent-text)]">
-            CLIPSY TOOLS
+            CLIPSYCUT TOOLS
           </div>
           <h2 className="mt-1 font-display text-2xl font-extrabold tracking-tight text-[var(--ink-primary)] uppercase">
             {activeTab === 'ai-clips' ? 'AI CLIPS' : activeTab}
@@ -284,21 +284,37 @@ export const ToolsSidebar: React.FC<ToolsSidebarProps> = ({
 
           {activeTab === 'captions' && (
             <div className="space-y-4">
-              <button
-                type="button"
-                disabled={isGeneratingCaptions}
-                onClick={onGenerateCaptions}
-                className="flex w-full items-center justify-center gap-2 rounded-md bg-[var(--accent)] py-2.5 text-xs font-bold text-[var(--accent-fg)] hover:bg-[var(--accent-hover)] disabled:opacity-60 cursor-pointer"
-              >
-                <Sparkles className="h-4 w-4" aria-hidden="true" />
-                <span>
-                  {isGeneratingCaptions ? 'Generating captions...' : 'Auto-generate captions'}
-                </span>
-              </button>
+              <div className="rounded-md border border-[var(--border-hairline)] bg-[var(--bg-elevated)] p-3">
+                <div className="flex items-center gap-2 font-mono text-[10px] font-bold tracking-wider text-[var(--ink-muted)]">
+                  <span className="flex h-4 w-4 items-center justify-center rounded-full bg-[var(--accent)] text-[9px] text-[var(--accent-fg)]">
+                    1
+                  </span>
+                  MAKE CAPTIONS
+                </div>
+                <p className="mt-1.5 text-[11px] leading-relaxed text-[var(--ink-secondary)]">
+                  One click adds timed text to the whole clip. You can edit every
+                  line afterwards.
+                </p>
+                <button
+                  type="button"
+                  disabled={isGeneratingCaptions}
+                  onClick={onGenerateCaptions}
+                  className="mt-2.5 flex w-full items-center justify-center gap-2 rounded-md bg-[var(--accent)] py-2.5 text-xs font-bold text-[var(--accent-fg)] hover:bg-[var(--accent-hover)] disabled:opacity-60 cursor-pointer"
+                >
+                  <Sparkles className="h-4 w-4" aria-hidden="true" />
+                  <span>
+                    {isGeneratingCaptions
+                      ? 'Writing captions…'
+                      : project.captions.length > 0
+                        ? 'Regenerate captions'
+                        : 'Generate captions'}
+                  </span>
+                </button>
+              </div>
 
               <div>
                 <div className="font-mono text-[10px] font-semibold text-[var(--ink-muted)]">
-                  CAPTION STYLE
+                  2. PICK A STYLE
                 </div>
                 <div className="mt-1.5 grid grid-cols-3 gap-1.5">
                   {(
@@ -324,27 +340,58 @@ export const ToolsSidebar: React.FC<ToolsSidebarProps> = ({
                 </div>
               </div>
 
-              <div className="space-y-2.5">
-                {project.captions.map((cap) => (
-                  <div
-                    key={cap.id}
-                    className="rounded-md border border-[var(--border-hairline)] bg-[var(--bg-elevated)] p-2.5"
-                  >
-                    <div className="mb-1.5 flex items-center justify-between font-mono text-[10px] text-[var(--accent-text)]">
-                      <span>
-                        {formatTimecode(cap.startSec)} – {formatTimecode(cap.endSec)}
-                      </span>
-                      {cap.highlightWord && <span>KEY: {cap.highlightWord}</span>}
-                    </div>
-                    <input
-                      type="text"
-                      value={cap.text}
-                      aria-label="Caption line text"
-                      onChange={(e) => onUpdateCaption(cap.id, { text: e.target.value })}
-                      className="w-full rounded border border-[var(--border-strong)] bg-[var(--bg-surface)] px-2 py-1 text-xs text-[var(--ink-primary)] focus:border-[var(--accent)] focus:outline-none"
-                    />
+              <div>
+                <div className="mb-1.5 flex items-center justify-between">
+                  <div className="font-mono text-[10px] font-semibold text-[var(--ink-muted)]">
+                    3. EDIT YOUR LINES
                   </div>
-                ))}
+                  {project.captions.length > 0 && (
+                    <span className="font-mono text-[10px] text-[var(--ink-muted)]">
+                      {project.captions.length} line
+                      {project.captions.length === 1 ? '' : 's'}
+                    </span>
+                  )}
+                </div>
+
+                {project.captions.length === 0 ? (
+                  <div className="rounded-md border border-dashed border-[var(--border-strong)] bg-[var(--bg-elevated)] px-3 py-4 text-center">
+                    <Captions
+                      className="mx-auto h-5 w-5 text-[var(--ink-muted)]"
+                      aria-hidden="true"
+                    />
+                    <p className="mt-1.5 text-[11px] leading-relaxed text-[var(--ink-muted)]">
+                      No captions yet. Click <strong>Generate captions</strong> above
+                      and they will appear here.
+                    </p>
+                  </div>
+                ) : (
+                  <div className="space-y-2.5">
+                    {project.captions.map((cap) => (
+                      <div
+                        key={cap.id}
+                        className="rounded-md border border-[var(--border-hairline)] bg-[var(--bg-elevated)] p-2.5"
+                      >
+                        <div className="mb-1.5 flex items-center justify-between font-mono text-[10px] text-[var(--accent-text)]">
+                          <span>
+                            {formatTimecode(cap.startSec)} – {formatTimecode(cap.endSec)}
+                          </span>
+                          {cap.highlightWord && (
+                            <span>HIGHLIGHT: {cap.highlightWord}</span>
+                          )}
+                        </div>
+                        <input
+                          type="text"
+                          value={cap.text}
+                          aria-label="Caption line text"
+                          onChange={(e) =>
+                            onUpdateCaption(cap.id, { text: e.target.value })
+                          }
+                          className="w-full rounded border border-[var(--border-strong)] bg-[var(--bg-surface)] px-2 py-1 text-xs text-[var(--ink-primary)] focus:border-[var(--accent)] focus:outline-none"
+                        />
+                      </div>
+                    ))}
+                  </div>
+                )}
               </div>
             </div>
           )}

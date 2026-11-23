@@ -1,7 +1,7 @@
 import React, { useRef } from 'react';
-import { Pause, Play, VideoOff } from 'lucide-react';
-import type { CropRect, LayoutMode } from '../../types/clipfast';
-import { clampCropRect } from '../../utils/editorLogic';
+import { AlertTriangle, Loader2, Pause, Play, RefreshCw, VideoOff } from 'lucide-react';
+import type { CropRect, LayoutMode } from '../../types/clipsycut';
+import { clampCropRect, isHlsUrl } from '../../utils/editorLogic';
 
 interface SourceFramingStageProps {
   videoRef: React.RefObject<HTMLVideoElement | null>;
@@ -18,8 +18,15 @@ interface SourceFramingStageProps {
   onVideoLoadedMetadata: () => void;
   onVideoTimeUpdate: () => void;
   onVideoEnded: () => void;
+  onVideoError?: () => void;
+  onVideoWaiting?: () => void;
+  onVideoReady?: () => void;
   masterVolume: number;
   isMuted: boolean;
+  playbackError?: string | null;
+  isLoading?: boolean;
+  isRepairing?: boolean;
+  onRepairMedia?: () => void;
 }
 
 type DragTarget = 'gameplay' | 'facecam';
@@ -40,8 +47,15 @@ export const SourceFramingStage: React.FC<SourceFramingStageProps> = ({
   onVideoLoadedMetadata,
   onVideoTimeUpdate,
   onVideoEnded,
+  onVideoError,
+  onVideoWaiting,
+  onVideoReady,
   masterVolume,
   isMuted,
+  playbackError,
+  isLoading,
+  isRepairing,
+  onRepairMedia,
 }) => {
   const containerRef = useRef<HTMLDivElement>(null);
 
@@ -136,7 +150,7 @@ export const SourceFramingStage: React.FC<SourceFramingStageProps> = ({
         >
           <video
             ref={videoRef}
-            src={videoUrl || undefined}
+            src={videoUrl && !isHlsUrl(videoUrl) ? videoUrl : undefined}
             playsInline
             muted={isMuted}
             onLoadedMetadata={() => {
@@ -146,6 +160,10 @@ export const SourceFramingStage: React.FC<SourceFramingStageProps> = ({
               onVideoLoadedMetadata();
             }}
             onTimeUpdate={onVideoTimeUpdate}
+            onWaiting={onVideoWaiting}
+            onCanPlay={onVideoReady}
+            onPlaying={onVideoReady}
+            onError={onVideoError}
             onEnded={onVideoEnded}
             className="h-full w-full object-contain"
           />
@@ -159,6 +177,42 @@ export const SourceFramingStage: React.FC<SourceFramingStageProps> = ({
               <p className="max-w-[280px] text-[11px] leading-relaxed text-[var(--ink-muted)]">
                 Scan a stream in the Library or use UPLOAD VIDEO to load your own footage. No demo media is preloaded.
               </p>
+            </div>
+          )}
+
+          {hasVideo && Boolean(playbackError) && (
+            <div className="absolute inset-0 z-[6] flex flex-col items-center justify-center gap-2 bg-[#0a0d0b]/95 px-6 text-center">
+              <AlertTriangle className="h-7 w-7 text-amber-400" aria-hidden="true" />
+              <p className="font-mono text-[11px] font-bold tracking-wider text-[var(--ink-primary)]">
+                SOURCE VIDEO COULD NOT PLAY
+              </p>
+              <p className="max-w-[320px] text-[11px] leading-relaxed text-[var(--ink-muted)]">
+                {playbackError}
+              </p>
+              {onRepairMedia && (
+                <button
+                  type="button"
+                  onClick={onRepairMedia}
+                  disabled={isRepairing}
+                  className="mt-1 inline-flex items-center gap-1.5 rounded-md bg-[var(--accent)] px-3 py-1.5 text-[11px] font-bold text-[var(--accent-fg)] hover:bg-[var(--accent-hover)] cursor-pointer disabled:opacity-60"
+                >
+                  {isRepairing ? (
+                    <Loader2 className="h-3 w-3 animate-spin" aria-hidden="true" />
+                  ) : (
+                    <RefreshCw className="h-3 w-3" aria-hidden="true" />
+                  )}
+                  {isRepairing ? 'Downloading stream…' : 'Repair media'}
+                </button>
+              )}
+            </div>
+          )}
+
+          {hasVideo && isLoading && !playbackError && (
+            <div className="pointer-events-none absolute inset-0 z-[6] flex items-center justify-center">
+              <span className="inline-flex items-center gap-2 rounded-full bg-black/70 px-3 py-1.5 font-mono text-[11px] font-semibold text-white">
+                <Loader2 className="h-3.5 w-3.5 animate-spin" aria-hidden="true" />
+                Loading stream media…
+              </span>
             </div>
           )}
 

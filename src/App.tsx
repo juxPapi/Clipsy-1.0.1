@@ -10,7 +10,7 @@ import type {
   ClipProject,
   ThemeMode,
   ViralMoment,
-} from './types/clipfast';
+} from './types/clipsycut';
 import { resolveSnippetForProject } from './utils/editorLogic';
 
 function routeFromLocation(): { route: AppRoute; projectId?: string } {
@@ -30,7 +30,7 @@ function routeFromLocation(): { route: AppRoute; projectId?: string } {
 
 function readStoredTheme(): ThemeMode {
   try {
-    const val = window.localStorage.getItem('clipsy-theme');
+    const val = window.localStorage.getItem('clipsycut-theme');
     return val === 'light' ? 'light' : 'dark';
   } catch {
     return 'dark';
@@ -39,7 +39,7 @@ function readStoredTheme(): ThemeMode {
 
 function readStoredAccent(): AccentPaletteId {
   try {
-    const val = window.localStorage.getItem('clipsy-accent');
+    const val = window.localStorage.getItem('clipsycut-accent');
     if (val === 'volt' || val === 'blue' || val === 'amber' || val === 'rose' || val === 'violet') {
       return val;
     }
@@ -66,8 +66,8 @@ export default function App() {
     root.classList.toggle('dark', theme === 'dark');
     root.dataset.accent = accent;
     try {
-      window.localStorage.setItem('clipsy-theme', theme);
-      window.localStorage.setItem('clipsy-accent', accent);
+      window.localStorage.setItem('clipsycut-theme', theme);
+      window.localStorage.setItem('clipsycut-accent', accent);
     } catch {
       // ignore storage failures
     }
@@ -165,6 +165,25 @@ export default function App() {
     setProjects((prev) => prev.filter((p) => p.id !== id));
   };
 
+  // Re-download lost/expired stream media for an existing project. Returns the
+  // repaired project so preview/editor can swap the video source immediately.
+  const handleRepairMedia = async (projectId: string): Promise<ClipProject | null> => {
+    try {
+      const res = await fetch(
+        `/api/projects/${encodeURIComponent(projectId)}/repair-media`,
+        { method: 'POST' }
+      );
+      const data = await res.json();
+      if (!res.ok || !data.project) return null;
+      setProjects((prev) =>
+        prev.map((p) => (p.id === data.project.id ? data.project : p))
+      );
+      return data.project as ClipProject;
+    } catch {
+      return null;
+    }
+  };
+
   const handleOpenEditor = (projectId: string, explicitMoment?: ViralMoment) => {
     setProjects((prev) =>
       prev.map((p) => {
@@ -195,7 +214,7 @@ export default function App() {
     if (loading) {
       return (
         <div className="flex h-screen items-center justify-center bg-[var(--bg-canvas)] font-mono text-xs text-[var(--ink-muted)]">
-          Loading Clipsy Editor...
+          Loading ClipsyCut Editor...
         </div>
       );
     }
@@ -222,6 +241,7 @@ export default function App() {
         onUpdateProject={handleUpdateProject}
         onSaveProject={handleSaveProject}
         onUploadVideo={handleUploadVideo}
+        onRepairMedia={handleRepairMedia}
         onNavigate={navigate}
         theme={theme}
         accent={accent}
@@ -259,6 +279,7 @@ export default function App() {
           onAnalyzeStreamUrl={handleAnalyzeStreamUrl}
           onUploadVideo={handleUploadVideo}
           onDeleteProject={handleDeleteProject}
+          onRepairMedia={handleRepairMedia}
           onNavigate={navigate}
         />
       )}

@@ -1,6 +1,6 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { Check, Moon, Palette, Sun } from 'lucide-react';
-import type { AccentPaletteId, ThemeMode } from '../types/clipfast';
+import type { AccentPaletteId, ThemeMode } from '../types/clipsycut';
 import { ACCENT_PALETTES, getAccentPalette } from '../utils/editorLogic';
 
 interface ThemeControlProps {

@@ -7,19 +7,22 @@ import dotenv from 'dotenv';
 import express from 'express';
 import multer from 'multer';
 import { createServer as createViteServer } from 'vite';
-import type { ClipProject } from './src/types/clipfast';
+import type { ClipProject } from './src/types/clipsycut';
 import {
   DEFAULT_FACECAM_CROP,
   DEFAULT_GAMEPLAY_CROP,
   parseStreamUrl,
 } from './src/utils/editorLogic';
 import {
+  DEFAULT_MAX_SOURCE_SEC,
+  cleanupStaleMediaParts,
   detectAudioSpikes,
   fetchYoutubeOembedMetadata,
   generateCaptionsWithGemini,
   hasBinary,
   identifyViralMomentsWithGemini,
   inspectStreamWithYtDlp,
+  isHlsUrl as isHlsPlaylistUrl,
   probeVideoFile,
   resolveStreamPlayback,
   resolveYtDlpBinary,
@@ -42,6 +45,12 @@ const LIBRARY_FILE = path.resolve(DATA_DIR, 'library.json');
 fs.mkdirSync(UPLOADS_DIR, { recursive: true });
 fs.mkdirSync(EXPORTS_DIR, { recursive: true });
 fs.mkdirSync(DATA_DIR, { recursive: true });
+
+// Remove abandoned yt-dlp fragments from previous interrupted downloads.
+const removedPartials = cleanupStaleMediaParts(UPLOADS_DIR);
+if (removedPartials > 0) {
+  console.log(`[media] cleaned ${removedPartials} stale partial download(s) from uploads/`);
+}
 
 /** Accepts only browser-playable local upload paths or http(s) stream URLs. */
 function safeClientVideoUrl(value: unknown): string {
@@ -101,6 +110,27 @@ const upload = multer({
   limits: { fileSize: 250 * 1024 * 1024 },
 });
 
+/** Proxy for HLS playlists/segments through the app origin. */
+function encodeHlsProxyUrl(targetUrl: string): string {
+  return `/api/hls-proxy?u=${encodeURIComponent(targetUrl)}`;
+}
+
+function rewriteHlsManifestUrls(text: string, baseUrl: string): string {
+  return text
+    .split('\n')
+    .map((line) => {
+      const trimmed = line.trim();
+      if (!trimmed || trimmed.startsWith('#')) return line;
+      try {
+        const absolute = new URL(trimmed, baseUrl).toString();
+        return encodeHlsProxyUrl(absolute);
+      } catch {
+        return line;
+      }
+    })
+    .join('\n');
+}
+
 async function startServer() {
   const app = express();
   app.use(express.json({ limit: '4mb' }));
@@ -121,6 +151,52 @@ async function startServer() {
         gemini: Boolean(process.env.GEMINI_API_KEY && process.env.GEMINI_API_KEY !== 'MY_GEMINI_API_KEY'),
       },
     });
+  });
+
+  // Same-origin HLS proxy. Chromium CORS blocks Googlevideo manifests from
+  // XHR; proxying the playlist and rewrites fragment URLs so hls.js plays them
+  // with fetch/XHR on the app origin without requiring CORS.
+  app.get('/api/hls-proxy', async (req, res) => {
+    const target = typeof req.query.u === 'string' ? req.query.u : '';
+    if (!target || (!isHlsPlaylistUrl(target) && !/^https?:\/\//i.test(target))) {
+      res.status(400).json({ error: 'Invalid HLS proxy target.' });
+      return;
+    }
+
+    try {
+      const response = await fetch(target, {
+        headers: {
+          'User-Agent':
+            'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/125.0 Safari/537.36',
+          Referer: 'https://www.youtube.com/',
+          'Accept': 'application/vnd.apple.mpegurl, application/x-mpegurl, */*',
+        },
+        redirect: 'follow',
+      });
+      if (!response.ok) {
+        res.status(502).json({ error: `HLS proxy failed (${response.status}).` });
+        return;
+      }
+
+      const contentType = response.headers.get('Content-Type') || '';
+      if (/m3u8/i.test(contentType)) {
+        const bodyText = await response.text();
+        res.type('application/vnd.apple.mpegurl').set('X-Content-Type-Options', 'nosniff')
+          .send(rewriteHlsManifestUrls(bodyText, target));
+        return;
+      }
+
+      const buffer = Buffer.from(await response.arrayBuffer());
+      const type =
+        contentType ||
+        (/ts$/i.test(target) ? 'video/mp2t' : 'application/octet-stream');
+      res.type(type).set('X-Content-Type-Options', 'nosniff').send(buffer);
+    } catch (err) {
+      console.error('[hls-proxy] fetch failed', target.slice(0, 120), err);
+      res.status(502).json({
+        error: err instanceof Error ? err.message : 'HLS proxy failed.',
+      });
+    }
   });
 
   // Library CRUD
@@ -174,25 +250,51 @@ async function startServer() {
       `${parsed.platform.toUpperCase()} ${parsed.contentKind.toUpperCase()} · ${parsed.identifier}`;
     const channelName =
       meta?.uploader || oembedMeta?.uploader || parsed.identifier || parsed.platform;
-    const durationSec = meta?.durationSec || 54;
+    const sourceDurationSec = meta?.durationSec || 54;
 
     // Resolve and use the stream's REAL playable media. No bundled demo footage
     // is ever attached to a scanned project.
     const mediaId = `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 7)}`;
-    const media = await resolveStreamPlayback(parsed.canonicalUrl, UPLOADS_DIR, mediaId);
+    const media = await resolveStreamPlayback(parsed.canonicalUrl, UPLOADS_DIR, mediaId, {
+      durationSec: sourceDurationSec,
+    });
+
+    // Long VODs are bounded to the downloaded window so every generated clip is
+    // guaranteed to exist inside the playable media.
+    const playableDurationSec = Math.max(
+      1,
+      Number(media.durationSec || sourceDurationSec || 54)
+    );
+    const analysisDurationSec = media.localPath
+      ? playableDurationSec
+      : Math.min(playableDurationSec, DEFAULT_MAX_SOURCE_SEC);
+
     const analysisMediaPath = media.localPath || media.videoUrl;
     const audioSpikes = analysisMediaPath
-      ? await detectAudioSpikes(analysisMediaPath, Math.min(durationSec, 600))
+      ? await detectAudioSpikes(analysisMediaPath, analysisDurationSec)
       : [];
+
+    const heatmap = (meta?.heatmap || [])
+      .filter((point) => Number(point.start_time) < analysisDurationSec)
+      .map((point) => ({
+        ...point,
+        end_time: Math.min(Number(point.end_time), analysisDurationSec),
+      }));
+    const chapters = (meta?.chapters || [])
+      .filter((chapter) => Number(chapter.start_time) < analysisDurationSec)
+      .map((chapter) => ({
+        ...chapter,
+        end_time: Math.min(Number(chapter.end_time), analysisDurationSec),
+      }));
 
     const aiResult = await identifyViralMomentsWithGemini({
       platform: parsed.platform,
       title,
       channelName,
-      durationSec,
+      durationSec: analysisDurationSec,
       audioSpikes,
-      heatmap: meta?.heatmap,
-      chapters: meta?.chapters,
+      heatmap,
+      chapters,
       description: meta?.description,
     });
 
@@ -203,15 +305,16 @@ async function startServer() {
       platform: parsed.platform,
       sourceUrl: parsed.canonicalUrl,
       videoUrl: media.videoUrl,
+      mediaNote: media.note,
       thumbnailUrl:
         meta?.thumbnailUrl ||
         oembedMeta?.thumbnailUrl ||
         '/src/assets/images/gaming_poster_showdown_1795371872597.jpg',
       channelName,
-      durationSec,
-      fps: meta?.fps || 30,
-      sourceWidth: meta?.width || 1920,
-      sourceHeight: meta?.height || 1080,
+      durationSec: playableDurationSec,
+      fps: media.fps || meta?.fps || 30,
+      sourceWidth: media.width || meta?.width || 1920,
+      sourceHeight: media.height || meta?.height || 1080,
       createdAt: new Date().toISOString(),
       status: aiResult.moments.length > 0 ? 'viral-detected' : 'ready',
       layout: 'split',
@@ -222,7 +325,10 @@ async function startServer() {
           id: `seg-${mediaId}`,
           label: aiResult.moments[0]?.title || 'Master clip',
           sourceStartSec: aiResult.moments[0]?.startSec ?? 0,
-          sourceEndSec: Math.min(durationSec, aiResult.moments[0]?.endSec ?? Math.min(durationSec, 30)),
+          sourceEndSec: Math.min(
+            playableDurationSec,
+            aiResult.moments[0]?.endSec ?? Math.min(playableDurationSec, 30)
+          ),
         },
       ],
       overlays: [],
@@ -249,6 +355,111 @@ async function startServer() {
       mediaNote: media.note,
       project,
     });
+  });
+
+  // Re-download missing/expired media for an existing project so old imports
+  // (empty media or expiring CDN links) become playable again.
+  app.post('/api/projects/:id/repair-media', async (req, res) => {
+    const id = String(req.params.id || '');
+    const projects = loadLibrary();
+    const idx = projects.findIndex((p) => p.id === id);
+    if (idx === -1) {
+      res.status(404).json({ error: 'Project not found.' });
+      return;
+    }
+
+    const project = projects[idx];
+    const localCandidate = (project.videoUrl || '').startsWith('/uploads/')
+      ? path.resolve(ROOT_DIR, project.videoUrl.replace(/^\//, ''))
+      : '';
+    if (localCandidate && fs.existsSync(localCandidate)) {
+      res.json({
+        ok: true,
+        project,
+        mediaSource: 'downloaded',
+        alreadyAvailable: true,
+        mediaNote: 'Local media is already available.',
+      });
+      return;
+    }
+
+    const sourceUrl =
+      project.sourceUrl ||
+      (/^https?:\/\//i.test(project.videoUrl || '') ? project.videoUrl : '');
+    if (!sourceUrl) {
+      res.status(400).json({
+        error: 'This project has no source stream link. Upload a local recording instead.',
+      });
+      return;
+    }
+
+    try {
+      const mediaId = `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 7)}`;
+      const media = await resolveStreamPlayback(sourceUrl, UPLOADS_DIR, mediaId, {
+        durationSec: project.durationSec,
+      });
+      if (!media.videoUrl) {
+        res.status(502).json({
+          error: media.note || 'Could not download playable media for this project.',
+        });
+        return;
+      }
+
+      const playableDurationSec = Math.max(
+        1,
+        Number(media.durationSec || project.durationSec || 54)
+      );
+      const analysisPath = media.localPath || media.videoUrl;
+      const audioSpikes = media.localPath
+        ? await detectAudioSpikes(analysisPath, playableDurationSec)
+        : [];
+      const aiResult = await identifyViralMomentsWithGemini({
+        platform: project.platform,
+        title: project.title,
+        channelName: project.channelName,
+        durationSec: playableDurationSec,
+        audioSpikes,
+      });
+
+      const firstMoment = aiResult.moments[0];
+      const updated: ClipProject = {
+        ...project,
+        videoUrl: media.videoUrl,
+        mediaNote: media.note,
+        durationSec: playableDurationSec,
+        fps: media.fps || project.fps,
+        sourceWidth: media.width || project.sourceWidth,
+        sourceHeight: media.height || project.sourceHeight,
+        viralMoments: aiResult.moments,
+        selectedMomentId: firstMoment?.id,
+        segments: [
+          {
+            id: `seg-${mediaId}`,
+            label: firstMoment?.title || 'Master clip',
+            sourceStartSec: firstMoment?.startSec ?? 0,
+            sourceEndSec: Math.min(
+              playableDurationSec,
+              firstMoment?.endSec ?? Math.min(playableDurationSec, 30)
+            ),
+          },
+        ],
+        status: aiResult.moments.length > 0 ? 'viral-detected' : 'ready',
+      };
+
+      projects[idx] = updated;
+      saveLibrary(projects);
+
+      res.json({
+        ok: true,
+        project: updated,
+        mediaSource: media.source,
+        mediaNote: media.note,
+      });
+    } catch (err) {
+      res.status(500).json({
+        error: err instanceof Error ? err.message : 'Media repair failed.',
+      });
+    }
   });
 
   // Real local video file upload + FFprobe + FFmpeg audio spike detection + Gemini moment scan
@@ -386,12 +597,12 @@ async function startServer() {
   });
 
   app.get('/api/extension/download', async (_req, res) => {
-    const archivePath = path.resolve(EXPORTS_DIR, 'clipsy-chrome-extension.tar.gz');
+    const archivePath = path.resolve(EXPORTS_DIR, 'clipsycut-chrome-extension.tar.gz');
     try {
       await execFileAsync('tar', ['-czf', archivePath, '-C', EXTENSION_DIR, '.'], {
         timeout: 10000,
       });
-      res.download(archivePath, 'clipsy-chrome-extension.tar.gz');
+      res.download(archivePath, 'clipsycut-chrome-extension.tar.gz');
     } catch (err) {
       res.status(500).json({
         error: err instanceof Error ? err.message : 'Failed to package extension.',
@@ -468,7 +679,7 @@ async function startServer() {
   }
 
   app.listen(3000, '0.0.0.0', () => {
-    console.log('ClipFast server listening on http://0.0.0.0:3000');
+    console.log('ClipsyCut server listening on http://0.0.0.0:3000');
   });
 }
 

@@ -1,6 +1,6 @@
 import React from 'react';
 import { Check, CheckCircle2, Download, Film, Loader2, X, AlertCircle } from 'lucide-react';
-import type { ExportPreset } from '../../types/clipfast';
+import type { ExportPreset } from '../../types/clipsycut';
 import {
   computeExportProgressStage,
   formatExportFileSize,
@@ -187,7 +187,7 @@ export const ExportProgressOverlay: React.FC<ExportProgressOverlayProps> = ({
             <Film className="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
             {isComplete ? (
               <span className="truncate">
-                {fileName || `Clipsy-short-${exportPreset}.mp4`} · {formatExportFileSize(sizeBytes)}
+                {fileName || `ClipsyCut-short-${exportPreset}.mp4`} · {formatExportFileSize(sizeBytes)}
               </span>
             ) : hasError ? (
               <span className="truncate">Check source video and retry</span>
@@ -208,7 +208,7 @@ export const ExportProgressOverlay: React.FC<ExportProgressOverlayProps> = ({
                 </button>
                 <a
                   href={downloadUrl}
-                  download={fileName || `Clipsy-short-${exportPreset}.mp4`}
+                  download={fileName || `ClipsyCut-short-${exportPreset}.mp4`}
                   className="inline-flex h-9 items-center gap-1.5 rounded-md bg-[var(--accent)] px-4 font-mono text-[11px] font-bold tracking-wider text-[var(--accent-fg)] hover:bg-[var(--accent-hover)] whitespace-nowrap shrink-0"
                 >
                   <Download className="h-3.5 w-3.5" aria-hidden="true" />

@@ -19,7 +19,7 @@ import type {
   ThemeMode,
   VideoEffect,
   ViralMoment,
-} from '../types/clipfast';
+} from '../types/clipsycut';
 import {
   DEFAULT_FACECAM_CROP,
   DEFAULT_GAMEPLAY_CROP,
@@ -30,7 +30,7 @@ import {
   resolveExportSpec,
   splitSegmentAtTime,
 } from '../utils/editorLogic';
-import { ClipsyLogo } from './Navbar';
+import { ClipsyCutLogo } from './Navbar';
 import type { AppRoute } from './Navbar';
 import { ThemeControl } from './ThemeControl';
 import { ExportProgressOverlay } from './editor/ExportProgressOverlay';
@@ -39,12 +39,14 @@ import { MomentRangeSlider } from './editor/MomentRangeSlider';
 import { SourceFramingStage } from './editor/SourceFramingStage';
 import { TimelineDock } from './editor/TimelineDock';
 import { ToolsSidebar } from './editor/ToolsSidebar';
+import { useHlsVideo } from '../hooks/useHlsVideo';
 
 interface EditorPageProps {
   project: ClipProject;
   onUpdateProject: (updated: ClipProject) => void;
   onSaveProject: (project: ClipProject) => Promise<void>;
   onUploadVideo: (file: File) => Promise<ClipProject | null>;
+  onRepairMedia?: (projectId: string) => Promise<ClipProject | null>;
   onNavigate: (route: AppRoute) => void;
   theme: ThemeMode;
   accent: AccentPaletteId;
@@ -57,6 +59,7 @@ export const EditorPage: React.FC<EditorPageProps> = ({
   onUpdateProject,
   onSaveProject,
   onUploadVideo,
+  onRepairMedia,
   onNavigate,
   theme,
   accent,
@@ -78,6 +81,9 @@ export const EditorPage: React.FC<EditorPageProps> = ({
   const [isSaved, setIsSaved] = useState(true);
   const [isUploading, setIsUploading] = useState(false);
   const [isGeneratingCaptions, setIsGeneratingCaptions] = useState(false);
+  const [mediaError, setMediaError] = useState<string | null>(null);
+  const [isMediaLoading, setIsMediaLoading] = useState(Boolean(project.videoUrl));
+  const [isRepairingMedia, setIsRepairingMedia] = useState(false);
   const [isExporting, setIsExporting] = useState(false);
   const [exportOverlayOpen, setExportOverlayOpen] = useState(false);
   const [exportElapsedMs, setExportElapsedMs] = useState(0);
@@ -106,6 +112,13 @@ export const EditorPage: React.FC<EditorPageProps> = ({
   const accentPalette = getAccentPalette(accent);
   const exportSpec = resolveExportSpec(exportPreset);
   const hasSourceVideo = Boolean(project.videoUrl && project.videoUrl.trim());
+  const hlsError = useHlsVideo(videoRef, hasSourceVideo ? project.videoUrl : undefined);
+  const playbackError = hlsError || mediaError;
+
+  useEffect(() => {
+    setMediaError(null);
+    setIsMediaLoading(Boolean(project.videoUrl));
+  }, [project.id, project.videoUrl]);
 
   const firstSegStart = project.segments[0]?.sourceStartSec ?? 0;
   const firstSegId = project.segments[0]?.id || 'seg-1';
@@ -168,6 +181,8 @@ export const EditorPage: React.FC<EditorPageProps> = ({
   const handleVideoLoadedMetadata = () => {
     const video = videoRef.current;
     if (!video) return;
+    setIsMediaLoading(false);
+    setMediaError(null);
     video.currentTime = firstSegStart;
   };
 
@@ -274,6 +289,39 @@ export const EditorPage: React.FC<EditorPageProps> = ({
     }
   };
 
+  const handleRepairMedia = async () => {
+    if (!onRepairMedia || isRepairingMedia) return;
+    setIsRepairingMedia(true);
+    setMediaError(null);
+    setIsMediaLoading(true);
+    try {
+      const repaired = await onRepairMedia(project.id);
+      if (!repaired) {
+        setMediaError('Repair failed. Upload a local recording instead.');
+        setIsMediaLoading(false);
+        return;
+      }
+      onUpdateProject(repaired);
+      const video = videoRef.current;
+      if (video) {
+        video.load();
+      }
+    } catch {
+      setMediaError('Repair failed. Upload a local recording instead.');
+      setIsMediaLoading(false);
+    } finally {
+      setIsRepairingMedia(false);
+    }
+  };
+
+  const handleVideoError = () => {
+    setMediaError(
+      'This video could not be loaded. The stream link may have expired, or the file may be incomplete.'
+    );
+    setIsMediaLoading(false);
+    setIsPlaying(false);
+  };
+
   const handleExportShort = async () => {
     if (!hasSourceVideo) {
       setExportError('No source video loaded. Scan a stream with media access or upload a video first.');
@@ -315,7 +363,7 @@ export const EditorPage: React.FC<EditorPageProps> = ({
         setExportError(data.error || 'Export failed.');
       } else if (data.downloadUrl) {
         setExportDownloadUrl(data.downloadUrl);
-        setExportFileName(data.fileName || `Clipsy-short-${exportPreset}.mp4`);
+        setExportFileName(data.fileName || `ClipsyCut-short-${exportPreset}.mp4`);
         setExportSizeBytes(typeof data.sizeBytes === 'number' ? data.sizeBytes : null);
         setExportedLabel(`${exportSpec.label} (${exportSpec.width}×${exportSpec.height} · ${exportSpec.fps}fps)`);
         mutateProject({ status: 'exported' });
@@ -443,9 +491,9 @@ export const EditorPage: React.FC<EditorPageProps> = ({
           onClick={() => onNavigate('home')}
           className="flex items-center gap-2.5 whitespace-nowrap shrink-0 cursor-pointer"
         >
-          <ClipsyLogo size={22} />
+          <ClipsyCutLogo size={22} />
           <span className="font-display text-base font-extrabold tracking-tight text-[var(--ink-primary)]">
-            CLIPSY
+            CLIPSYCUT
           </span>
         </button>
 
@@ -555,7 +603,7 @@ export const EditorPage: React.FC<EditorPageProps> = ({
             {exportDownloadUrl && (
               <a
                 href={exportDownloadUrl}
-                download={`Clipsy-short-${exportPreset}.mp4`}
+                download={`ClipsyCut-short-${exportPreset}.mp4`}
                 className="rounded bg-[var(--accent)] px-3 py-1 font-mono text-[11px] font-bold text-[var(--accent-fg)]"
               >
                 Download MP4
@@ -615,8 +663,15 @@ export const EditorPage: React.FC<EditorPageProps> = ({
               onVideoLoadedMetadata={handleVideoLoadedMetadata}
               onVideoTimeUpdate={handleVideoTimeUpdate}
               onVideoEnded={() => setIsPlaying(false)}
+              onVideoError={handleVideoError}
+              onVideoWaiting={() => setIsMediaLoading(true)}
+              onVideoReady={() => setIsMediaLoading(false)}
               masterVolume={project.masterVolume}
               isMuted={isMuted}
+              playbackError={playbackError}
+              isLoading={isMediaLoading}
+              isRepairing={isRepairingMedia}
+              onRepairMedia={onRepairMedia ? handleRepairMedia : undefined}
             />
 
             <FinalShortStage

@@ -1,6 +1,6 @@
-# Clipsy
+# ClipsyCut
 
-**Clipsy** is a full-stack stream clipping studio and 9:16 vertical video editor for **YouTube**, **Kick**, and **Twitch** creators. Paste a stream, VOD, or clip link (or upload a recording / connect the Manifest V3 Chrome extension) to detect viral moments, preview snippets, reframe Gameplay + Facecam into 9:16 vertical layouts, burn in timed captions & overlays, and export H.264 MP4 shorts at `1080p60`, `720p60`, or `720p30`.
+**ClipsyCut** is a full-stack stream clipping studio and 9:16 vertical video editor for **YouTube**, **Kick**, and **Twitch** creators. Paste a stream, VOD, or clip link (or upload a recording / connect the Manifest V3 Chrome extension) to detect viral moments, preview snippets, reframe Gameplay + Facecam into 9:16 vertical layouts, burn in timed captions & overlays, and export H.264 MP4 shorts at `1080p60`, `720p60`, or `720p30`.
 
 ---
 
@@ -30,7 +30,7 @@
 | **yt-dlp** *(required for stream links)* | Stream/VOD metadata, heatmaps, and **real playable media** | Resolved on `PATH` or in `~/.local/bin`, `/usr/local/bin`, `/usr/bin`; without it, upload a local video instead |
 | **Gemini API Key** | AI viral moment scoring & auto-generated captions | Uses `@google/genai` server-side only |
 
-> **Note on YouTube bot checks in cloud environments**: When running on cloud/datacenter IPs where YouTube blocks `yt-dlp` with `"Sign in to confirm you're not a bot"`, Clipsy automatically falls back to YouTube's public oEmbed endpoint for real stream title, channel name, and thumbnail metadata. No bundled demo footage is ever substituted: if playable stream media cannot be retrieved, the project is created without a preview and you can upload a local recording in the editor. Uploading an `.mp4`/`.webm` file directly always processes your exact footage end-to-end.
+> **Note on YouTube bot checks in cloud environments**: When running on cloud/datacenter IPs where YouTube blocks `yt-dlp` with `"Sign in to confirm you're not a bot"`, ClipsyCut automatically falls back to YouTube's public oEmbed endpoint for real stream title, channel name, and thumbnail metadata. No bundled demo footage is ever substituted: if playable stream media cannot be retrieved, the project is created without a preview and you can upload a local recording in the editor. Uploading an `.mp4`/`.webm` file directly always processes your exact footage end-to-end.
 
 ---
 
@@ -117,7 +117,7 @@ No demo footage is bundled: if media cannot be fetched, the editor shows a no-so
 │   │   ├── ThemeControl.tsx        # Dark/Light skin & 5-accent palette popover
 │   │   └── editor/                 # SourceFramingStage, FinalShortStage, MomentRangeSlider, ExportProgressOverlay, ToolsSidebar, TimelineDock
 │   ├── utils/editorLogic.ts        # Pure geometry, URL validation, timeline, export preset/progress, moment range & 5-8 clip normalization helpers
-│   └── types/clipfast.ts           # Shared TypeScript interfaces
+│   └── types/clipsycut.ts           # Shared TypeScript interfaces
 ├── extension/                      # Unpacked Manifest V3 Chrome Extension (manifest.json, content.js, popup.html, popup.js)
 ├── public/assets/                  # Static marketing images only (no preloaded demo video)
 └── data/                           # Local persisted library JSON (created empty on first boot; no demo projects)
@@ -131,16 +131,16 @@ No demo footage is bundled: if media cannot be fetched, the editor shows a no-so
 - `POST /api/upload` — Accepts multipart video (`video` field, up to 250 MB), runs `ffprobe` + FFmpeg audio spike detection + Gemini scan (also normalized to 5–8 moments).
 - `POST /api/captions/generate` — Generates timed short-form caption segments via Gemini, with five deterministic local captions when no API key is configured.
 - `POST /api/export` — Renders a 9:16 H.264 MP4 (`1080p60`, `720p60`, or `720p30`) from the local upload/download or a validated remote media URL to `/exports/<file>.mp4`.
-- `GET /api/extension/files` · `GET /api/extension/download` · `POST /api/extension/capture` — Inspects/downloads the Manifest V3 extension (`clipsy-chrome-extension.tar.gz`) and receives live chat-spike captures.
+- `GET /api/extension/files` · `GET /api/extension/download` · `POST /api/extension/capture` — Inspects/downloads the Manifest V3 extension (`clipsycut-chrome-extension.tar.gz`) and receives live chat-spike captures.
 
 ---
 
 ## Integrating the Live Clipping Chrome Extension
 
 1. Visit **`/live-clipping`** in the web app and click **Download extension bundle** (or load the `/extension` directory directly).
-2. Extract the downloaded `clipsy-chrome-extension.tar.gz` archive (if downloaded).
+2. Extract the downloaded `clipsycut-chrome-extension.tar.gz` archive (if downloaded).
 3. Open `chrome://extensions`, enable **Developer mode**, click **Load unpacked**, and select the extracted folder (or `/extension`).
-4. Navigate to any live **Twitch**, **Kick**, or **YouTube** stream with live chat visible, open the **Clipsy Live Clipper** popup, and click **Start auto clipping**.
+4. Navigate to any live **Twitch**, **Kick**, or **YouTube** stream with live chat visible, open the **ClipsyCut Live Clipper** popup, and click **Start auto clipping**.
 5. Whenever live chat velocity spikes (`>= 2.2x` baseline), `content.js` sends a `POST /api/extension/capture` payload to `http://localhost:3000` (update `currentAppUrl` in `extension/popup.js` if pointing to a deployed `APP_URL`).
 
 ---

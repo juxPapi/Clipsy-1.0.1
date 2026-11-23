@@ -4,10 +4,11 @@ import os from 'node:os';
 import path from 'node:path';
 import { promisify } from 'node:util';
 import { GoogleGenAI, ThinkingLevel, Type } from '@google/genai';
-import type { CaptionSegment, Platform, ViralMoment } from '../../src/types/clipfast';
+import type { CaptionSegment, Platform, ViralMoment } from '../../src/types/clipsycut';
 import {
   MAX_GENERATED_CLIPS,
   MIN_GENERATED_CLIPS,
+  buildFallbackCaptions,
   normalizeViralMoments,
 } from '../../src/utils/editorLogic';
 
@@ -46,18 +47,157 @@ export interface StreamMediaResult {
   videoUrl: string;
   source: 'downloaded' | 'direct-url' | 'none';
   note?: string;
+  /** Real duration of the resolved media (may be shorter than the source VOD). */
+  durationSec?: number;
+  width?: number;
+  height?: number;
+  fps?: number;
+  /** True when only the first N seconds of a long VOD were downloaded. */
+  truncated?: boolean;
+  downloadError?: string;
+}
+
+/** Long VODs are bounded so previews play fast and never fill the disk. */
+export const DEFAULT_MAX_SOURCE_SEC = Math.max(
+  60,
+  Math.min(3600, Number(process.env.CLIPSYCUT_MAX_SOURCE_SEC || 900))
+);
+
+const DOWNLOAD_TIMEOUT_MS = Math.max(
+  120000,
+  Math.min(900000, Number(process.env.CLIPSYCUT_DOWNLOAD_TIMEOUT_MS || 600000))
+);
+
+export function encodeHlsProxyUrl(targetUrl: string): string {
+  return `/api/hls-proxy?u=${encodeURIComponent(targetUrl)}`;
+}
+
+/** True for remote HLS playlists and same-origin app HLS proxies. */
+export function isHlsUrl(value: string): boolean {
+  if (!value || typeof value !== 'string') return false;
+  if (value.startsWith('/api/hls-proxy')) return true;
+  try {
+    const url = new URL(value, 'http://localhost');
+    if (url.pathname.endsWith('.m3u8')) return true;
+    if (/\\.m3u8($|\\?)/i.test(value)) return true;
+    const host = url.hostname.toLowerCase();
+    if (host === 'manifest.googlevideo.com') return true;
+    return /manifest[\/\\]hls_playlist/i.test(url.pathname) || /m3u8/i.test(url.search);
+  } catch {
+    return /\\.m3u8($|\\?)/i.test(value);
+  }
+}
+
+/**
+ * Removes abandoned yt-dlp downloads (`.part`, `.ytdl`, fragment parts).
+ * Long streams used to leave multi-hundred-MB stubs behind after timeouts.
+ */
+export function cleanupStaleMediaParts(uploadsDir: string, olderThanMs = 60 * 60 * 1000): number {
+  let removed = 0;
+  try {
+    if (!fs.existsSync(uploadsDir)) return 0;
+    const now = Date.now();
+    for (const name of fs.readdirSync(uploadsDir)) {
+      const isPartial =
+        name.endsWith('.part') || name.endsWith('.ytdl') || /\.part[-.]/i.test(name);
+      if (!isPartial) continue;
+      const full = path.join(uploadsDir, name);
+      try {
+        const stat = fs.statSync(full);
+        if (now - stat.mtimeMs < olderThanMs) continue;
+        fs.rmSync(full, { force: true });
+        removed += 1;
+      } catch {
+        // Ignore locks; a later run can retry.
+      }
+    }
+  } catch {
+    // Non-fatal cleanup.
+  }
+  return removed;
+}
+
+function hasFastStart(filePath: string): boolean {
+  try {
+    const fd = fs.openSync(filePath, 'r');
+    const buf = Buffer.alloc(512 * 1024);
+    const read = fs.readSync(fd, buf, 0, buf.length, 0);
+    fs.closeSync(fd);
+    const head = buf.subarray(0, read).toString('latin1');
+    const moov = head.indexOf('moov');
+    const mdat = head.indexOf('mdat');
+    return moov !== -1 && (mdat === -1 || moov < mdat);
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Guarantees a file the browser can actually play: H.264/AAC in a fast-start
+ * MP4 container. HLS/TS/WebM/MKV downloads are remuxed or transcoded here.
+ */
+async function ensureBrowserPlayableMp4(
+  inputPath: string,
+  outputPath: string,
+  maxDurationSec?: number
+): Promise<{ filePath: string; probe: VideoProbeInfo }> {
+  const probe = await probeVideoFile(inputPath);
+  const isMp4 = /\.[a-z0-9]+$/i.test(outputPath) && /mp4/i.test(path.extname(inputPath));
+  const alreadyPlayable =
+    isMp4 &&
+    probe.videoCodec === 'h264' &&
+    (!probe.hasAudio || probe.audioCodec === 'aac') &&
+    hasFastStart(inputPath);
+
+  if (alreadyPlayable) {
+    if (path.resolve(inputPath) !== path.resolve(outputPath)) {
+      fs.copyFileSync(inputPath, outputPath);
+    }
+    return { filePath: outputPath, probe };
+  }
+
+  const copyOnly = probe.videoCodec === 'h264' && (!probe.hasAudio || probe.audioCodec === 'aac');
+  const args = ['-y', '-i', inputPath];
+  if (copyOnly) {
+    args.push('-c', 'copy');
+  } else {
+    args.push(
+      '-c:v',
+      'libx264',
+      '-preset',
+      'veryfast',
+      '-crf',
+      '24',
+      '-pix_fmt',
+      'yuv420p',
+      '-c:a',
+      'aac',
+      '-b:a',
+      '160k'
+    );
+  }
+  args.push('-movflags', '+faststart');
+  if (maxDurationSec && maxDurationSec > 0) {
+    args.push('-t', String(Math.ceil(maxDurationSec)));
+  }
+  args.push(outputPath);
+
+  await execFileAsync('ffmpeg', args, { timeout: 15 * 60 * 1000, maxBuffer: 8 * 1024 * 1024 });
+  const outProbe = await probeVideoFile(outputPath);
+  return { filePath: outputPath, probe: outProbe };
 }
 
 /**
  * Resolves the REAL media of a pasted stream so the preview/editor never falls
- * back to bundled demo footage. Prefers downloading a bounded 720p copy into
- * the uploads directory (also enables FFmpeg export); falls back to a direct
- * CDN URL for browser playback only.
+ * back to bundled demo footage. Downloads a bounded, browser-safe MP4 into the
+ * uploads directory (also enables FFmpeg export); falls back to a direct CDN
+ * URL (HLS is played with hls.js) when downloading is blocked.
  */
 export async function resolveStreamPlayback(
   canonicalUrl: string,
   uploadsDir: string,
-  mediaId: string
+  mediaId: string,
+  options: { durationSec?: number; maxSourceSec?: number } = {}
 ): Promise<StreamMediaResult> {
   const bin = resolveYtDlpBinary();
   if (!bin) {
@@ -68,13 +208,29 @@ export async function resolveStreamPlayback(
     };
   }
 
-  const format = 'best[height<=720][ext=mp4]/best[height<=720]/best';
+  const cap = Math.max(60, options.maxSourceSec || DEFAULT_MAX_SOURCE_SEC);
+  const durationHint = Math.max(0, Number(options.durationSec) || 0);
+  const maxHeight = durationHint > 0 && durationHint <= 600 ? 720 : 480;
+  const format = [
+    `b[ext=mp4][height<=${maxHeight}]/b[height<=${maxHeight}]`,
+    'bv*/ba*/b',
+  ].join('/');
+
   let directUrl = '';
   try {
     const { stdout } = await execFileAsync(
       bin,
-      ['-g', '-f', format, '--no-playlist', '--socket-timeout', '10', canonicalUrl],
-      { timeout: 25000, maxBuffer: 2 * 1024 * 1024 }
+      [
+        '-g',
+        '-f',
+        format,
+        '--no-playlist',
+        '--no-warnings',
+        '--socket-timeout',
+        '15',
+        canonicalUrl,
+      ],
+      { timeout: 30000, maxBuffer: 2 * 1024 * 1024 }
     );
     directUrl =
       stdout
@@ -85,50 +241,151 @@ export async function resolveStreamPlayback(
     // Direct URL extraction can fail on bot-protected platforms; still try download.
   }
 
+  // Live HLS is bounded by the client-side hls.js player instead of a local
+  // download; only long VOD-style media is bounded via --download-sections.
+  const truncated = durationHint > cap + 5 && !isHlsUrl(directUrl);
+
   fs.mkdirSync(uploadsDir, { recursive: true });
+  cleanupStaleMediaParts(uploadsDir);
+  for (const name of fs.readdirSync(uploadsDir)) {
+    if (name.startsWith(`stream-${mediaId}.`) && /\.(part|ytdl)$/i.test(name)) {
+      try {
+        fs.rmSync(path.join(uploadsDir, name), { force: true });
+      } catch {
+        // ignore
+      }
+    }
+  }
+
   const outTemplate = path.join(uploadsDir, `stream-${mediaId}.%(ext)s`);
+  const downloadArgs = [
+    '-f',
+    format,
+    '--no-playlist',
+    '--no-warnings',
+    '--socket-timeout',
+    '20',
+    '--retries',
+    '3',
+    '--fragment-retries',
+    '5',
+    '--remux-video',
+    'mp4',
+    '--merge-output-format',
+    'mp4',
+    '-o',
+    outTemplate,
+  ];
+  if (truncated) {
+    downloadArgs.push('--download-sections', `*0-${cap}`, '--force-keyframes-at-cuts');
+  }
+  downloadArgs.push(canonicalUrl);
+
+  let downloadError = '';
   try {
-    await execFileAsync(
-      bin,
-      [
-        '-f',
-        format,
-        '--no-playlist',
-        '--socket-timeout',
-        '10',
-        '--retries',
-        '2',
-        '-o',
-        outTemplate,
-        canonicalUrl,
-      ],
-      { timeout: 180000, maxBuffer: 2 * 1024 * 1024 }
-    );
+    await execFileAsync(bin, downloadArgs, {
+      timeout: DOWNLOAD_TIMEOUT_MS,
+      maxBuffer: 8 * 1024 * 1024,
+    });
     const downloaded = fs
       .readdirSync(uploadsDir)
-      .find((name) => name.startsWith(`stream-${mediaId}.`) && /\.(mp4|webm|mkv|mov)$/i.test(name));
+      .filter(
+        (name) =>
+          name.startsWith(`stream-${mediaId}.`) &&
+          /\.(mp4|webm|mkv|mov|ts)$/i.test(name) &&
+          fs.statSync(path.join(uploadsDir, name)).size > 10 * 1024
+      )
+      .sort(
+        (a, b) =>
+          fs.statSync(path.join(uploadsDir, b)).size - fs.statSync(path.join(uploadsDir, a)).size
+      )[0];
+
     if (downloaded) {
-      return {
-        localPath: path.join(uploadsDir, downloaded),
-        videoUrl: `/uploads/${downloaded}`,
-        source: 'downloaded',
-      };
+      const downloadedPath = path.join(uploadsDir, downloaded);
+      const finalPath = path.join(uploadsDir, `stream-${mediaId}.mp4`);
+      try {
+        const normalized = await ensureBrowserPlayableMp4(
+          downloadedPath,
+          finalPath,
+          truncated ? cap : undefined
+        );
+        if (path.resolve(downloadedPath) !== path.resolve(normalized.filePath)) {
+          try {
+            fs.rmSync(downloadedPath, { force: true });
+          } catch {
+            // ignore
+          }
+        }
+        return {
+          localPath: normalized.filePath,
+          videoUrl: `/uploads/${path.basename(normalized.filePath)}`,
+          source: 'downloaded',
+          durationSec: normalized.probe.durationSec,
+          width: normalized.probe.width,
+          height: normalized.probe.height,
+          fps: normalized.probe.fps,
+          truncated,
+          note: truncated
+            ? `Downloaded the first ${Math.round(cap / 60)} minutes of this long stream so it plays instantly.`
+            : undefined,
+        };
+      } catch (err) {
+        // Keep the yt-dlp output when FFmpeg normalization fails (most browsers
+        // still play MP4/WebM); report the issue for diagnostics.
+        downloadError = err instanceof Error ? err.message : String(err);
+        const fallbackProbe = await probeVideoFile(downloadedPath).catch(() => null);
+        if (fallbackProbe) {
+          return {
+            localPath: downloadedPath,
+            videoUrl: `/uploads/${downloaded}`,
+            source: 'downloaded',
+            durationSec: fallbackProbe.durationSec,
+            width: fallbackProbe.width,
+            height: fallbackProbe.height,
+            fps: fallbackProbe.fps,
+            truncated,
+            downloadError,
+          };
+        }
+      }
     }
-  } catch {
-    // Fall through to the direct CDN URL.
+  } catch (err) {
+    downloadError = err instanceof Error ? err.message.split('\n')[0] : String(err);
+    // Remove partial fragments so they cannot masquerade as playable media.
+    for (const name of fs.readdirSync(uploadsDir)) {
+      if (name.startsWith(`stream-${mediaId}.`) && /\.(part|ytdl)$/i.test(name)) {
+        try {
+          fs.rmSync(path.join(uploadsDir, name), { force: true });
+        } catch {
+          // ignore
+        }
+      }
+    }
   }
 
   if (directUrl) {
+    const proxiedHls = isHlsUrl(directUrl) ? encodeHlsProxyUrl(directUrl) : '';
     return {
-      videoUrl: directUrl,
+      videoUrl: proxiedHls,
       source: 'direct-url',
-      note: 'Streaming from the platform CDN. Upload a local copy if you need FFmpeg export.',
+      durationSec: durationHint || undefined,
+      truncated: false,
+      downloadError: downloadError || undefined,
+      note: proxiedHls
+        ? 'Playing directly from the platform HLS CDN through the app proxy. If the link expires, use Repair media.'
+        : 'Playing directly from the platform CDN. Use Repair media if it expires.',
     };
   }
+
+  const reason = downloadError
+    ? ` (${downloadError.replace(/\s+/g, ' ').slice(0, 140)})`
+    : '';
   return {
     videoUrl: '',
     source: 'none',
-    note: 'Could not retrieve playable media from this stream. Upload a local recording to preview and edit.',
+    truncated: false,
+    downloadError: downloadError || undefined,
+    note: `Could not retrieve playable media from this stream${reason}. Use Repair media or upload a local recording.`,
   };
 }
 
@@ -168,6 +425,8 @@ export interface VideoProbeInfo {
   height: number;
   fps: number;
   hasAudio: boolean;
+  videoCodec?: string;
+  audioCodec?: string;
 }
 
 export async function probeVideoFile(filePath: string): Promise<VideoProbeInfo> {
@@ -177,17 +436,18 @@ export async function probeVideoFile(filePath: string): Promise<VideoProbeInfo> 
       '-v',
       'error',
       '-show_entries',
-      'format=duration:stream=codec_type,width,height,r_frame_rate',
+      'format=duration:stream=codec_type,codec_name,width,height,r_frame_rate',
       '-of',
       'json',
       filePath,
     ],
-    { timeout: 15000 }
+    { timeout: 30000 }
   );
 
   const parsed = JSON.parse(stdout || '{}');
   const streams: Array<{
     codec_type?: string;
+    codec_name?: string;
     width?: number;
     height?: number;
     r_frame_rate?: string;
@@ -214,6 +474,8 @@ export async function probeVideoFile(filePath: string): Promise<VideoProbeInfo> 
     height: videoStream?.height || 720,
     fps,
     hasAudio: Boolean(audioStream),
+    videoCodec: videoStream?.codec_name,
+    audioCodec: audioStream?.codec_name,
   };
 }
 
@@ -243,7 +505,10 @@ export async function detectAudioSpikes(
         'null',
         '-',
       ],
-      { timeout: 20000, maxBuffer: 4 * 1024 * 1024 }
+      {
+        timeout: Math.min(150000, Math.max(25000, durationSec * 120)),
+        maxBuffer: 8 * 1024 * 1024,
+      }
     );
 
     const samples: Array<{ time: number; db: number }> = [];
@@ -268,24 +533,70 @@ export async function detectAudioSpikes(
     }
 
     const avgDb = samples.reduce((acc, s) => acc + s.db, 0) / samples.length;
-    const spikes = samples.filter((s) => s.db > avgDb + 3.5);
+    const variance =
+      samples.reduce((acc, s) => acc + (s.db - avgDb) ** 2, 0) / Math.max(1, samples.length);
+    const stdDb = Math.sqrt(variance);
+    const sortedDb = [...samples].map((s) => s.db).sort((a, b) => a - b);
+    const p85 = sortedDb[Math.min(sortedDb.length - 1, Math.floor(sortedDb.length * 0.85))];
+    const threshold = Math.max(avgDb + Math.max(1.5, stdDb * 0.6), p85);
 
-    const windows: AudioPeakWindow[] = [];
+    // Only real peaks above both the adaptive floor and the 85th percentile.
+    const spikes = samples.filter((s) => s.db >= threshold);
+    if (spikes.length === 0) {
+      return [];
+    }
+
+    // Merge nearby detections into single highlight windows.
+    const clusters: Array<{ first: number; last: number; peakDb: number }> = [];
     for (const sample of spikes) {
-      const last = windows[windows.length - 1];
-      if (last && sample.time <= last.endSec + 2.5) {
-        last.endSec = Math.min(durationSec, Number((sample.time + 2).toFixed(1)));
+      const last = clusters[clusters.length - 1];
+      if (last && sample.time <= last.last + 4) {
+        last.last = sample.time;
         last.peakDb = Math.max(last.peakDb, sample.db);
       } else {
-        windows.push({
-          startSec: Math.max(0, Number((sample.time - 2).toFixed(1))),
-          endSec: Math.min(durationSec, Number((sample.time + 4).toFixed(1))),
-          peakDb: Number(sample.db.toFixed(1)),
-        });
+        clusters.push({ first: sample.time, last: sample.time, peakDb: sample.db });
       }
     }
 
-    return windows.sort((a, b) => b.peakDb - a.peakDb).slice(0, MAX_GENERATED_CLIPS);
+    const windows: AudioPeakWindow[] = clusters.map((cluster) => {
+      const minSpan = 6;
+      const maxSpan = 14;
+      let start = Math.max(0, cluster.first - 3);
+      let end = Math.min(durationSec, cluster.last + 4);
+      if (end - start < minSpan) {
+        const center = (cluster.first + cluster.last) / 2;
+        start = Math.max(0, center - minSpan / 2);
+        end = Math.min(durationSec, start + minSpan);
+        start = Math.max(0, end - minSpan);
+      }
+      if (end - start > maxSpan) {
+        end = start + maxSpan;
+      }
+      return {
+        startSec: Number(start.toFixed(1)),
+        endSec: Number(end.toFixed(1)),
+        peakDb: Number(cluster.peakDb.toFixed(1)),
+      };
+    });
+
+    // Rank by loudness, then keep non-overlapping windows so the five to eight
+    // clips each come from a distinct high-energy moment.
+    const selected: AudioPeakWindow[] = [];
+    for (const window of windows.sort((a, b) => b.peakDb - a.peakDb)) {
+      const overlaps = selected.some((other) => {
+        const overlap =
+          Math.min(window.endSec, other.endSec) - Math.max(window.startSec, other.startSec);
+        const smaller = Math.min(
+          window.endSec - window.startSec,
+          other.endSec - other.startSec
+        );
+        return overlap > 0 && overlap / Math.max(0.1, smaller) > 0.5;
+      });
+      if (!overlaps) selected.push(window);
+      if (selected.length >= MAX_GENERATED_CLIPS) break;
+    }
+
+    return selected;
   } catch {
     return [];
   }
@@ -410,17 +721,41 @@ export async function identifyViralMomentsWithGemini(params: {
         peakMetric: `Heatmap peak ${point.value}`,
       })),
     ];
-    const candidates: ViralMoment[] = params.audioSpikes.map((spike, idx) => ({
+    const audioCandidates: ViralMoment[] = params.audioSpikes.map((spike, idx) => ({
       id: `spike-${idx + 1}`,
       title: `Audio energy spike #${idx + 1}`,
       startSec: spike.startSec,
       endSec: spike.endSec,
-      score: Math.min(98, Math.round(78 + (spike.peakDb + 30) * 0.8)),
+      score: Math.min(98, Math.round(74 + Math.max(0, spike.peakDb + 40) * 0.7)),
       category: 'reaction',
-      reason: `FFmpeg measured RMS loudness surge at ${spike.peakDb} dB.`,
+      reason: `FFmpeg measured an RMS loudness surge peaking at ${spike.peakDb} dB.`,
       hookText: 'WAIT FOR THE REACTION',
       peakMetric: `${spike.peakDb} dB audio peak`,
     }));
+
+    // Replay heatmaps are the strongest "this is the good part" signal on
+    // platforms that expose them, so they compete directly with audio peaks.
+    const heatmapCandidates: ViralMoment[] = (params.heatmap || [])
+      .filter((point) => Number(point.value) > 0.2)
+      .map((point, idx) => {
+        const center = (Number(point.start_time) + Number(point.end_time)) / 2;
+        const span = Math.max(8, Math.min(14, Number(point.end_time) - Number(point.start_time) + 6));
+        const start = Math.max(0, Math.min(safeDuration - 6, center - span / 2));
+        const end = Math.min(safeDuration, start + span);
+        return {
+          id: `heat-${idx + 1}`,
+          title: `Most-replayed peak #${idx + 1}`,
+          startSec: Number(start.toFixed(1)),
+          endSec: Number(end.toFixed(1)),
+          score: Math.min(98, Math.round(62 + Number(point.value) * 36)),
+          category: 'clutch' as const,
+          reason: `Platform replay heatmap spikes to ${Math.round(Number(point.value) * 100)}% here.`,
+          hookText: 'CHAT REPLAYED THIS',
+          peakMetric: `Heatmap ${Math.round(Number(point.value) * 100)}%`,
+        };
+      });
+
+    const candidates = [...audioCandidates, ...heatmapCandidates];
 
     return {
       moments: normalizeViralMoments(candidates, safeDuration, signalSeeds),
@@ -536,27 +871,16 @@ export async function generateCaptionsWithGemini(params: {
   hookContext?: string;
 }): Promise<{ captions: CaptionSegment[]; error?: string }> {
   const ai = getGeminiClient();
-  const safeDur = Math.max(6, Math.min(60, params.durationSec));
+  const safeDur = Math.max(2, Math.min(180, params.durationSec));
 
   if (!ai) {
-    // Local fallback keeps the caption tool usable without an API key.
-    const source = `${params.hookContext || ''} ${params.title}`.replace(/[^\w\s']/g, ' ');
-    const words = source.split(/\s+/).map((w) => w.trim()).filter(Boolean);
-    const fallbackLines = words.length
-      ? Array.from({ length: 5 }, (_, i) => words.slice(i * 2, i * 2 + 3).join(' ') || 'WATCH THIS')
-      : ['WATCH THIS', 'NO WAY', 'CHAT WENT WILD', 'WHAT A PLAY', 'INCREDIBLE'];
-    const step = safeDur / fallbackLines.length;
-    const captions: CaptionSegment[] = fallbackLines.map((line, idx) => ({
-      id: `cap-local-${Date.now().toString(36)}-${idx}`,
-      text: line.toUpperCase().slice(0, 44),
-      startSec: Number((step * idx).toFixed(1)),
-      endSec: Number(Math.min(safeDur, step * (idx + 1) - 0.3).toFixed(1)),
-      highlightWord: line.split(/\s+/)[0]?.toUpperCase().slice(0, 16) || '',
-    }));
-    return { captions };
+    return {
+      captions: buildFallbackCaptions(params.title, safeDur, params.hookContext),
+    };
   }
 
-  const prompt = `Generate 5 short-form TikTok/Shorts caption lines timed across 0 to ${safeDur} seconds for a ${params.platform} stream clip titled "${params.title}". Context: ${params.hookContext || 'High-energy gameplay and streamer reaction'}. Each caption should be 3-6 punchy words with 1 highlightWord.`;
+  const captionCount = Math.max(2, Math.min(6, Math.round(safeDur / 4) || 2));
+  const prompt = `Generate ${captionCount} short-form TikTok/Shorts caption lines timed across 0 to ${safeDur} seconds for a ${params.platform} stream clip titled "${params.title}". Context: ${params.hookContext || 'High-energy gameplay and streamer reaction'}. Each caption should be 3-6 punchy words with 1 highlightWord. Cover the whole clip without overlapping timestamps.`;
 
   const callCaptionsModel = async (
     model: 'gemini-4-hydrogen' | 'gemini-3.1-flash-lite',
@@ -599,20 +923,35 @@ export async function generateCaptionsWithGemini(params: {
     }
 
     const raw = JSON.parse((response.text ?? '[]').trim());
-    const captions: CaptionSegment[] = (Array.isArray(raw) ? raw : []).map((c, idx) => ({
-      id: `cap-${Date.now().toString(36)}-${idx}`,
-      text: String(c.text || ''),
-      startSec: Math.max(0, Number(c.startSec) || idx * 3),
-      endSec: Math.min(safeDur, Number(c.endSec) || idx * 3 + 2.8),
-      highlightWord: String(c.highlightWord || ''),
-    }));
+    const stamp = Date.now().toString(36);
+    const captions: CaptionSegment[] = (Array.isArray(raw) ? raw : [])
+      .slice(0, 6)
+      .map((c, idx) => {
+        const start = Math.max(0, Math.min(safeDur - 0.4, Number(c.startSec) || idx * 3));
+        const requestedEnd = Number(c.endSec) || start + 2.8;
+        const end = Math.max(start + 0.3, Math.min(safeDur, requestedEnd));
+        return {
+          id: `cap-${stamp}-${idx}`,
+          text: String(c.text || '').trim().slice(0, 60),
+          startSec: Number(start.toFixed(2)),
+          endSec: Number(end.toFixed(2)),
+          highlightWord: String(c.highlightWord || '').trim().slice(0, 18),
+        };
+      })
+      .filter((caption) => caption.text.length > 0 && caption.endSec > caption.startSec)
+      .sort((a, b) => a.startSec - b.startSec);
+
+    if (captions.length === 0) {
+      return { captions: buildFallbackCaptions(params.title, safeDur, params.hookContext) };
+    }
 
     return { captions };
   } catch (err) {
     const msg = formatGeminiError(err);
     console.error(`[Gemini] generateCaptionsWithGemini failed after ${Date.now() - t0}ms:`, msg);
+    // Never leave the user with a dead captions button.
     return {
-      captions: [],
+      captions: buildFallbackCaptions(params.title, safeDur, params.hookContext),
       error: msg,
     };
   }

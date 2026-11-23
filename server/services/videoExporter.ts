@@ -9,7 +9,7 @@ import type {
   LayoutMode,
   TextOverlay,
   TimelineSegment,
-} from '../../src/types/clipfast';
+} from '../../src/types/clipsycut';
 import {
   clampCropRect,
   computeLayoutGeometry,
@@ -115,17 +115,47 @@ export async function exportVerticalShortMp4(
   const gpCropX = Math.max(0, Math.min(srcW - gpCropW, Math.round(gp.x * srcW)));
   const gpCropY = Math.max(0, Math.min(srcH - gpCropH, Math.round(gp.y * srcH)));
 
-  const firstSeg = payload.segments[0] ?? {
-    sourceStartSec: 0,
-    sourceEndSec: Math.min(probe.durationSec, 30),
-  };
-  const segStart = Math.max(0, firstSeg.sourceStartSec);
-  const segDur = Math.max(1, Math.min(60, firstSeg.sourceEndSec - segStart));
+  const sourceDurationSec = Math.max(1, probe.durationSec);
+
+  // Normalize the timeline into real, ordered cuts. Previously only the first
+  // segment was exported, so split/delete edits silently disappeared.
+  const cuts = (payload.segments || [])
+    .map((segment) => {
+      const start = Math.max(0, Math.min(sourceDurationSec - 0.2, Number(segment.sourceStartSec) || 0));
+      const end = Math.max(
+        start + 0.2,
+        Math.min(sourceDurationSec, Number(segment.sourceEndSec) || start + 1)
+      );
+      return { start, end, duration: end - start };
+    })
+    .filter((cut) => cut.duration >= 0.2);
+
+  if (cuts.length === 0) {
+    cuts.push({
+      start: 0,
+      end: Math.min(sourceDurationSec, 30),
+      duration: Math.min(sourceDurationSec, 30),
+    });
+  }
+  const totalDur = cuts.reduce((sum, cut) => sum + cut.duration, 0);
 
   const filters: string[] = [];
 
-  // Trim base video and convert to target export FPS
-  filters.push(`[0:v]trim=start=${segStart}:duration=${segDur},setpts=PTS-STARTPTS,fps=${outFps}[basev]`);
+  // Trim each timeline segment separately, then concatenate into one base
+  // stream so the exported short matches the editor timeline exactly.
+  cuts.forEach((cut, idx) => {
+    filters.push(
+      `[0:v]trim=start=${cut.start.toFixed(3)}:duration=${cut.duration.toFixed(3)},setpts=PTS-STARTPTS,fps=${outFps}[v${idx}]`
+    );
+  });
+
+  if (cuts.length > 1) {
+    filters.push(
+      `${cuts.map((_, idx) => `[v${idx}]`).join('')}concat=n=${cuts.length}:v=1:a=0[basev]`
+    );
+  } else {
+    filters.push(`[v0]null[basev]`);
+  }
 
   if (geom.facecamDest) {
     filters.push(`[basev]split=2[gp_in][fc_in]`);
@@ -140,7 +170,7 @@ export async function exportVerticalShortMp4(
   );
 
   // Build vertical canvas at target resolution and frame rate
-  filters.push(`color=c=black:s=${outW}x${outH}:r=${outFps}:d=${segDur}[bg]`);
+  filters.push(`color=c=black:s=${outW}x${outH}:r=${outFps}:d=${totalDur.toFixed(3)}[bg]`);
   filters.push(`[bg][gp_scaled]overlay=${gpDest.x}:${gpDest.y}:shortest=1[stage1]`);
 
   let lastVideoLabel = 'stage1';
@@ -179,7 +209,7 @@ export async function exportVerticalShortMp4(
         text: ov.text.trim(),
         yExpr: `h*${Math.max(0.1, Math.min(0.88, ov.yPercent / 100)).toFixed(2)}`,
         start: Math.max(0, ov.startSec),
-        end: Math.min(segDur, ov.endSec),
+        end: Math.min(totalDur, ov.endSec),
         color: '#ffffff',
         size: Math.round(Math.max(26, Math.min(54, ov.fontSize || 38)) * fontScale),
       });
@@ -191,7 +221,7 @@ export async function exportVerticalShortMp4(
         text: cap.text.trim().toUpperCase(),
         yExpr: `h*0.74`,
         start: Math.max(0, cap.startSec),
-        end: Math.min(segDur, cap.endSec),
+        end: Math.min(totalDur, cap.endSec),
         color: captionColor,
         size: Math.round(36 * fontScale),
       });
@@ -208,7 +238,7 @@ export async function exportVerticalShortMp4(
     lastVideoLabel = nextLabel;
   });
 
-  const fileName = `Clipsy-short-${spec.preset}-${Date.now().toString(36)}.mp4`;
+  const fileName = `ClipsyCut-short-${spec.preset}-${Date.now().toString(36)}.mp4`;
   const outputPath = path.resolve(exportsDir, fileName);
   if (!outputPath.startsWith(exportsDir + path.sep)) {
     throw new Error('Invalid export destination.');
@@ -218,9 +248,19 @@ export async function exportVerticalShortMp4(
 
   if (probe.hasAudio) {
     const vol = Math.max(0, Math.min(2, Number(payload.masterVolume ?? 1)));
-    filters.push(
-      `[0:a]atrim=start=${segStart}:duration=${segDur},asetpts=PTS-STARTPTS,volume=${vol.toFixed(2)}[outa]`
-    );
+    cuts.forEach((cut, idx) => {
+      filters.push(
+        `[0:a]atrim=start=${cut.start.toFixed(3)}:duration=${cut.duration.toFixed(3)},asetpts=PTS-STARTPTS[a${idx}]`
+      );
+    });
+    if (cuts.length > 1) {
+      filters.push(
+        `${cuts.map((_, idx) => `[a${idx}]`).join('')}concat=n=${cuts.length}:v=0:a=1[basea]`
+      );
+    } else {
+      filters.push(`[a0]anull[basea]`);
+    }
+    filters.push(`[basea]volume=${vol.toFixed(2)}[outa]`);
     args.push('-filter_complex', filters.join(';'), '-map', `[${lastVideoLabel}]`, '-map', '[outa]');
     args.push('-c:a', 'aac', '-b:a', '128k');
   } else {
@@ -243,7 +283,16 @@ export async function exportVerticalShortMp4(
     outputPath
   );
 
-  await execFileAsync('ffmpeg', args, { timeout: 90000, maxBuffer: 4 * 1024 * 1024 });
+  // Rendering time scales with clip length and preset; 90s was too short for
+  // multi-minute 1080p60 cuts and produced truncated/failed exports.
+  const exportTimeoutMs = Math.max(
+    120000,
+    Math.min(45 * 60 * 1000, Math.round(totalDur * 7000))
+  );
+  await execFileAsync('ffmpeg', args, {
+    timeout: exportTimeoutMs,
+    maxBuffer: 8 * 1024 * 1024,
+  });
 
   return {
     outputPath,

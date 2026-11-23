@@ -1,5 +1,6 @@
 import type {
   AccentPaletteId,
+  CaptionSegment,
   ClipProject,
   CropRect,
   ExportPreset,
@@ -7,7 +8,7 @@ import type {
   Platform,
   TimelineSegment,
   ViralMoment,
-} from '../types/clipfast';
+} from '../types/clipsycut';
 
 export interface ParsedStreamUrl {
   valid: boolean;
@@ -715,9 +716,26 @@ export function computeExportProgressStage(
   };
 }
 
+/**
+ * True for HTTP(S) HLS playlists, which Chromium needs `hls.js` to play.
+ */
+export function isHlsUrl(value: string): boolean {
+  if (!value || typeof value !== 'string') return false;
+  if (value.startsWith('/api/hls-proxy')) return true;
+  try {
+    const url = new URL(value, 'http://localhost');
+    if (url.pathname.endsWith('.m3u8')) return true;
+    if (/\.m3u8($|\?)/i.test(value)) return true;
+    const host = url.hostname.toLowerCase();
+    if (host === 'manifest.googlevideo.com') return true;
+    return /manifest\/hls_playlist\//i.test(url.pathname) || /m3u8/i.test(url.search);
+  } catch {
+    return /\.m3u8($|\?)/i.test(value);
+  }
+}
+
 /** Default number of viral clips generated from a stream. */
-export const MIN_GENERATED_CLIPS = 5;
-/** Upper bound when more than five potential viral moments are detected. */
+export const MIN_GENERATED_CLIPS = 5;/** Upper bound when more than five potential viral moments are detected. */
 export const MAX_GENERATED_CLIPS = 8;
 
 /**
@@ -864,6 +882,60 @@ export function normalizeViralMoments(
   }
 
   return kept.slice(0, MAX_GENERATED_CLIPS);
+}
+
+/**
+ * Builds deterministic, non-overlapping caption lines that fit a clip exactly.
+ * Used when Gemini is unavailable (or fails) and as the client-side safety net,
+ * so the captions tool always produces editable, exportable captions.
+ */
+export function buildFallbackCaptions(
+  title: string,
+  durationSec: number,
+  hookContext?: string
+): CaptionSegment[] {
+  const duration = Math.max(1.2, Math.min(180, Number(durationSec) || 30));
+  const count = Math.max(2, Math.min(6, Math.round(duration / 4) || 2));
+  const step = duration / count;
+
+  const rawWords = `${title || ''} ${hookContext || ''}`
+    .replace(/[^a-zA-Z0-9'\s]/g, ' ')
+    .split(/\s+/)
+    .map((word) => word.trim())
+    .filter((word) => word.length > 1);
+
+  const canned = [
+    'WATCH THIS',
+    'NO WAY',
+    'CHAT WENT WILD',
+    'WHAT A PLAY',
+    'CLUTCH MOMENT',
+    'INCREDIBLE',
+  ];
+
+  const lines: string[] = [];
+  for (let i = 0; i < count; i += 1) {
+    const chunk = rawWords.slice(i * 3, i * 3 + 3).join(' ');
+    lines.push((chunk || canned[i % canned.length]).toUpperCase().slice(0, 44));
+  }
+
+  const stamp = Date.now().toString(36);
+  return lines
+    .map((text, idx) => {
+      const words = text.split(/\s+/);
+      const highlight =
+        [...words].sort((a, b) => b.length - a.length)[0]?.slice(0, 18) || words[0] || '';
+      const startSec = Number((step * idx).toFixed(2));
+      const endSec = Number(Math.min(duration, step * (idx + 1) - 0.05).toFixed(2));
+      return {
+        id: `cap-local-${stamp}-${idx}`,
+        text,
+        startSec,
+        endSec,
+        highlightWord: highlight,
+      };
+    })
+    .filter((caption) => caption.endSec > caption.startSec);
 }
 
 /**

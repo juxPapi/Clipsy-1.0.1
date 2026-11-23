@@ -9,7 +9,7 @@ import {
   Upload,
   Video,
 } from 'lucide-react';
-import type { ClipProject, Platform, ViralMoment } from '../types/clipfast';
+import type { ClipProject, Platform, ViralMoment } from '../types/clipsycut';
 import {
   formatPreciseTimecode,
   formatTimecode,
@@ -26,6 +26,7 @@ interface LibraryPageProps {
   onAnalyzeStreamUrl: (url: string) => Promise<ClipProject | null>;
   onUploadVideo: (file: File) => Promise<ClipProject | null>;
   onDeleteProject: (id: string) => Promise<void>;
+  onRepairMedia?: (projectId: string) => Promise<ClipProject | null>;
   onNavigate: (route: AppRoute) => void;
 }
 
@@ -50,6 +51,7 @@ export const LibraryPage: React.FC<LibraryPageProps> = ({
   onAnalyzeStreamUrl,
   onUploadVideo,
   onDeleteProject,
+  onRepairMedia,
   onNavigate,
 }) => {
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -141,7 +143,7 @@ export const LibraryPage: React.FC<LibraryPageProps> = ({
         <div className="flex flex-col justify-between gap-4 border-b border-[var(--border-hairline)] pb-8 md:flex-row md:items-end">
           <div>
             <p className="font-mono text-xs font-semibold tracking-wider text-[var(--accent-text)]">
-              CLIPSY LIBRARY &amp; VIRAL SCANNER
+              CLIPSYCUT LIBRARY &amp; VIRAL SCANNER
             </p>
             <h1 className="mt-1.5 font-display text-3xl font-bold tracking-tight text-[var(--ink-primary)]">
               Detect moments. Preview snippets. Open in 9:16 editor.
@@ -509,6 +511,7 @@ export const LibraryPage: React.FC<LibraryPageProps> = ({
           moment={previewTarget.moment}
           onClose={() => setPreviewTarget(null)}
           onOpenInEditor={(pid, moment) => onOpenEditor(pid, moment)}
+          onRepairMedia={onRepairMedia}
         />
       )}
     </div>

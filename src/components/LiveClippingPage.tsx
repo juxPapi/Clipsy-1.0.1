@@ -8,7 +8,7 @@ import {
   Square,
   Zap,
 } from 'lucide-react';
-import type { ClipProject, Platform } from '../types/clipfast';
+import type { ClipProject, Platform } from '../types/clipsycut';
 import { computeChatSpikeScore } from '../utils/editorLogic';
 import type { AppRoute } from './Navbar';
 
@@ -80,7 +80,7 @@ export const LiveClippingPage: React.FC<LiveClippingPageProps> = ({
       if (data.ok && data.project) {
         onCaptureSaved(data.project);
         setCaptures((prev) => [data.project, ...prev]);
-        setStatusMessage(`Saved "${data.project.title}" to your Clipsy Library.`);
+        setStatusMessage(`Saved "${data.project.title}" to your ClipsyCut Library.`);
       }
     } catch {
       setStatusMessage('Failed to save live capture.');
@@ -97,20 +97,20 @@ export const LiveClippingPage: React.FC<LiveClippingPageProps> = ({
         <div className="flex flex-col justify-between gap-6 border-b border-[var(--border-hairline)] pb-8 md:flex-row md:items-end">
           <div>
             <p className="font-mono text-xs font-semibold tracking-wider text-[var(--accent-text)]">
-              CLIPSY CHROME EXTENSION · TWITCH, KICK &amp; YOUTUBE
+              CLIPSYCUT CHROME EXTENSION · TWITCH, KICK &amp; YOUTUBE
             </p>
             <h1 className="mt-2 font-display text-4xl font-extrabold tracking-tight text-[var(--ink-primary)]">
               Catch chat spikes while the stream is live.
             </h1>
             <p className="mt-3 max-w-2xl text-sm leading-relaxed text-[var(--ink-muted)]">
-              Install the Clipsy Manifest V3 browser extension to monitor live chat velocity across Twitch, Kick, and YouTube, or test live auto-clipping right here.
+              Install the ClipsyCut Manifest V3 browser extension to monitor live chat velocity across Twitch, Kick, and YouTube, or test live auto-clipping right here.
             </p>
           </div>
 
           <div className="flex flex-wrap gap-3 shrink-0">
             <a
               href="/api/extension/download"
-              download="clipsy-chrome-extension.tar.gz"
+              download="clipsycut-chrome-extension.tar.gz"
               className="inline-flex items-center gap-2 rounded-md bg-[var(--accent)] px-5 py-2.5 text-xs font-bold text-[var(--accent-fg)] hover:bg-[var(--accent-hover)]"
             >
               <Download className="h-4 w-4" aria-hidden="true" />
@@ -282,7 +282,7 @@ export const LiveClippingPage: React.FC<LiveClippingPageProps> = ({
           {/* Manifest V3 Source Code & Sideload Guide */}
           <section className="rounded-lg border border-[var(--border-hairline)] bg-[var(--bg-surface)] p-6">
             <h2 className="font-display text-lg font-bold text-[var(--ink-primary)]">
-              Included Clipsy Chrome Extension (Manifest V3)
+              Included ClipsyCut Chrome Extension (Manifest V3)
             </h2>
             <p className="mt-1.5 text-xs leading-relaxed text-[var(--ink-muted)]">
               Download the archive, extract it, open <span className="font-mono text-[var(--ink-primary)]">chrome://extensions</span>, enable Developer Mode, and click <strong className="text-[var(--ink-primary)]">Load unpacked</strong>.

@@ -1,10 +1,27 @@
 # Changelog
 
-All notable changes to **Clipsy** are documented in this file.
+All notable changes to **ClipsyCut** are documented in this file.
 
 ## [Unreleased]
 
 ### Added
+
+- **Repair Media Recovery**: Existing projects with an expired stream link, missing local file, or empty `videoUrl` get a **Repair media** button in the snippet preview and editor. The new `POST /api/projects/:id/repair-media` endpoint re-resolves the real stream with `yt-dlp`, re-normalizes clip metadata, and updates the library project immediately.
+- **HLS-Safe Playback**: HLS playlists are proxied through the app origin, so imported YouTube/Twitch/Kick CDN links no longer need browser CORS. Both snippet preview and editor show loadable/error states and can recover.
+- **Multi-Segment Export**: `videoExporter.ts` now trims and concatenates every timeline segment instead of exporting only the first segment; FFmpeg timeout scales with clip length.
+
+### Changed
+
+- **Beginner-Friendly Captions Tab**: The editor CAPTIONS tab is now a clear 1-2-3 flow (generate → pick style → edit lines), with timestamps and an empty-state message when captions have not been generated.
+- **Renamed App**: The application is now **ClipsyCut** across the UI, extension metadata/archive name, exports, README, metadata.json, and package metadata.
+
+### Fixed
+
+- **Caption Fallback Timing**: Local captions now cover the whole clip in non-overlapping windows; the old fallback repeated words due to off-by-two-segment slicing.
+- **Caption Generation**: Server caption schema requests 5-6 timestamped captions and sanitizes Gemini output bounds; no-key fallback is deterministic.
+- **Export Runtime**: `videoExporter.ts` uses a longer, length-scaled FFmpeg timeout for long clips (previously 90s).
+
+### Added (0.5.0 and earlier details)
 
 - **Export Progress Overlay (`ExportProgressOverlay`)**: Added a dedicated modal progress overlay (`0–100%`) in `EditorPage` when initiating a `1080p60`, `720p60`, or `720p30` download, showing preset metadata, live progress bar (`computeExportProgressStage`), 4-stage pipeline status (`Probing source streams`, `9:16 Gameplay & Facecam reframe`, `H.264 encode`, `Audio, captions & faststart MP4`), rendered MP4 size, error recovery, and instant `Download MP4` CTA upon completion.
 - **`README.md` & `CHANGELOG.md`**: Documented prerequisites (`Node.js >= 22`, `FFmpeg`, `FFprobe`, `yt-dlp`), environment variables (`GEMINI_API_KEY`, `APP_URL`, `NODE_ENV`, `DISABLE_HMR`), run/build/test commands, API endpoints, and Chrome extension setup.
@@ -18,7 +35,7 @@ All notable changes to **Clipsy** are documented in this file.
 - **Unit Tests**: Added coverage for the 5–8 clip normalizer (few candidates, many candidates, signal seeds, and short full-length streams) and for playback/export readiness.
 
 ### Changed
-- **No Preloaded Demo Media**: Removed the bundled `ClipFast-clip.mp4` / `stream-sample.mp4` demo videos and all seeded demo projects. Scanned projects now carry real stream media (or an explicit empty `videoUrl` with an "upload a video" hint) instead of silently substituting sample footage. Home/library demo CTAs were replaced with "scan a stream or upload video".
+- **No Preloaded Demo Media**: Removed the bundled `ClipsyCut-clip.mp4` / `stream-sample.mp4` demo videos and all seeded demo projects. Scanned projects now carry real stream media (or an explicit empty `videoUrl` with an "upload a video" hint) instead of silently substituting sample footage. Home/library demo CTAs were replaced with "scan a stream or upload video".
 - **Empty / No-Media States**: `SourceFramingStage`, `FinalShortStage`, `SnippetPreviewModal`, and the editor route now show clear "No source video" states and disable playback/export when no media is loaded.
 - **Export Accepts Remote Media**: `videoExporter.ts` can now FFmpeg-export from a validated http(s) stream URL when no local download exists; private/localhost/IP targets remain rejected.
 - **Tooling**: Bumped `esbuild` to `^0.28.0` to satisfy Vite 8's peer range and regenerated `bun.lock`; replaced `__dirname` with `import.meta.dirname` in `vite.config.ts` to clear the Vite config warning. Runtime `uploads/`, `exports/`, and `data/` are now gitignored.
@@ -43,7 +60,7 @@ All notable changes to **Clipsy** are documented in this file.
 
 ### Added
 - **YouTube oEmbed Metadata Fallback (`fetchYoutubeOembedMetadata`)**: Normalized `/live/<id>` and `/shorts/<id>` URLs to resolve real YouTube stream titles, channel names, and thumbnails automatically whenever datacenter `yt-dlp` requests encounter YouTube bot checks.
-- **Clipsy Rebrand & Custom Logo**: Renamed the application, metadata, extension bundle (`clipsy-chrome-extension.tar.gz`), and exported files (`Clipsy-short-*.mp4`) to **Clipsy**, and added the geometric chamfered 9:16 `ClipsyLogo` mark.
+- **ClipsyCut Rebrand & Custom Logo**: Renamed the application, metadata, extension bundle (`clipsycut-chrome-extension.tar.gz`), and exported files (`ClipsyCut-short-*.mp4`) to **ClipsyCut**, and added the geometric chamfered 9:16 `ClipsyCutLogo` mark.
 - **Dark / Light Skins & 5 Accent Palettes (`ThemeControl`)**: Added persistent Dark/Light theme switching and 5 accent color palettes (`Volt Green`, `Electric Blue`, `Solar Amber`, `Crimson Pulse`, `Violet Spark`) wired across CSS variables, editor crop boxes, live canvas previews, and exported captions.
 - **High-Frame-Rate Export Presets (`1080p60` & `720p60`)**: Added `1080p60 (1080×1920 @ 60fps)` and `720p60 (720×1280 @ 60fps)` options alongside `720p30` in `EditorPage` and `videoExporter.ts`.
 - **Gaming Stream & Poster Artwork**: Added 5 generated gaming posters/graphics across Home, Library cards, and the built-in composite 1920×1080 FPS stream + facecam demo video.

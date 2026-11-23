@@ -8,7 +8,7 @@ import {
   Volume2,
   VolumeX,
 } from 'lucide-react';
-import type { ClipProject } from '../../types/clipfast';
+import type { ClipProject } from '../../types/clipsycut';
 import { getTimelineTotalDuration } from '../../utils/editorLogic';
 
 interface TimelineDockProps {

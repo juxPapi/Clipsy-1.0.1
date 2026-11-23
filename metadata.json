@@ -1,5 +1,5 @@
 {
-  "name": "Clipsy",
+  "name": "ClipsyCut",
   "description": "Automatic viral moment detector and 9:16 vertical stream clip editor for YouTube, Kick, and Twitch.",
   "requestFramePermissions": [],
   "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]

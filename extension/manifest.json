@@ -1,8 +1,8 @@
 {
   "manifest_version": 3,
-  "name": "Clipsy Live Clipper",
+  "name": "ClipsyCut Live Clipper",
   "version": "1.0.0",
-  "description": "Monitors live chat activity on Twitch, Kick, and YouTube streams to auto-capture viral moments into your Clipsy library.",
+  "description": "Monitors live chat activity on Twitch, Kick, and YouTube streams to auto-capture viral moments into your ClipsyCut library.",
   "permissions": ["activeTab", "storage", "scripting"],
   "host_permissions": [
     "https://www.twitch.tv/*",
@@ -11,7 +11,7 @@
   ],
   "action": {
     "default_popup": "popup.html",
-    "default_title": "Clipsy Live Clipper"
+    "default_title": "ClipsyCut Live Clipper"
   },
   "content_scripts": [
     {

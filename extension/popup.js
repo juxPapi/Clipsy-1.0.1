@@ -6,14 +6,14 @@ let activeMonitoring = false;
 let currentAppUrl = 'http://localhost:3000';
 
 function renderStatus() {
-  chrome.storage.local.get({ clipsyStatus: { monitoring: false }, clipsySavedMoments: [] }, (res) => {
-    const s = res.clipsyStatus || {};
+  chrome.storage.local.get({ clipsycutStatus: { monitoring: false }, clipsycutSavedMoments: [] }, (res) => {
+    const s = res.clipsycutStatus || {};
     activeMonitoring = Boolean(s.monitoring);
     toggleBtn.textContent = activeMonitoring ? 'Stop auto clipping' : 'Start auto clipping';
     if (activeMonitoring) {
-      statusText.textContent = `${(s.platform || '').toUpperCase()} · ${s.ratePerMin || 0} msg/min (baseline ${s.baseline || 0}) · ${res.clipsySavedMoments.length} clips`;
+      statusText.textContent = `${(s.platform || '').toUpperCase()} · ${s.ratePerMin || 0} msg/min (baseline ${s.baseline || 0}) · ${res.clipsycutSavedMoments.length} clips`;
     } else {
-      statusText.textContent = `Ready · ${res.clipsySavedMoments.length} captured moments`;
+      statusText.textContent = `Ready · ${res.clipsycutSavedMoments.length} captured moments`;
     }
   });
 }

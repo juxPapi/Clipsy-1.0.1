@@ -1,6 +1,9 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
+  MAX_GENERATED_CLIPS,
+  MIN_GENERATED_CLIPS,
+  buildFallbackCaptions,
   clampCropRect,
   clampMomentRange,
   computeChatSpikeScore,
@@ -13,9 +16,8 @@ import {
   formatTimecode,
   getAccentPalette,
   getTimelineTotalDuration,
+  isHlsUrl,
   mapTimelineToSourceTime,
-  MAX_GENERATED_CLIPS,
-  MIN_GENERATED_CLIPS,
   normalizeViralMoments,
   parseStreamUrl,
   resolveExportSpec,
@@ -224,8 +226,7 @@ test('normalizeViralMoments produces 5-8 clips from stream detections', () => {
   assert.ok(seeded.some((m) => m.peakMetric.includes('+14 dB')));
 });
 
-test('computeExportProgressStage advances monotonically 0->94% per preset and snaps to 100% on complete', () => {
-  const start = computeExportProgressStage(0, '1080p60', false);
+test('computeExportProgressStage advances monotonically 0->94% per preset and snaps to 100% on complete', () => {  const start = computeExportProgressStage(0, '1080p60', false);
   assert.equal(start.percent, 0);
   assert.equal(start.stepIndex, 0);
 
@@ -249,4 +250,34 @@ test('computeExportProgressStage advances monotonically 0->94% per preset and sn
   assert.equal(formatExportFileSize(512 * 1024), '512 KB');
   assert.equal(formatExportFileSize(2.5 * 1024 * 1024), '2.5 MB');
   assert.equal(formatExportFileSize(null), 'Ready');
+});
+
+test('buildFallbackCaptions covers the whole clip without overlapping or repeating text', () => {
+  const captions = buildFallbackCaptions('Insane 1v5 clutch reaction', 12, 'Chat exploded');
+  assert.ok(captions.length >= 2 && captions.length <= 6);
+
+  for (const [idx, caption] of captions.entries()) {
+    assert.ok(caption.text.length > 0);
+    assert.ok(caption.endSec > caption.startSec);
+    assert.ok(caption.startSec >= 0);
+    assert.ok(caption.endSec <= 12.001);
+    if (idx > 0) {
+      assert.ok(
+        caption.startSec >= captions[idx - 1].endSec,
+        'caption windows must not overlap'
+      );
+    }
+  }
+
+  // Each line should be distinct so the fallback never stutters the same words.
+  assert.equal(new Set(captions.map((caption) => caption.text)).size, captions.length);
+  // Every caption must stay inside the source clip.
+  assert.ok(captions[captions.length - 1].endSec <= 12);
+});
+
+test('isHlsUrl detects m3u8 playlists and ignores normal MP4 sources', () => {
+  assert.equal(isHlsUrl('https://cdn.example.com/live/index.m3u8?token=abc'), true);
+  assert.equal(isHlsUrl('/uploads/stream-abc.mp4'), false);
+  assert.equal(isHlsUrl('https://cdn.example.com/video.mp4'), false);
+  assert.equal(isHlsUrl(''), false);
 });

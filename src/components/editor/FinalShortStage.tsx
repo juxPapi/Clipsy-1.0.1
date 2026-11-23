@@ -7,7 +7,7 @@ import type {
   LayoutMode,
   TextOverlay,
   VideoEffect,
-} from '../../types/clipfast';
+} from '../../types/clipsycut';
 import { computeLayoutGeometry, resolveExportSpec } from '../../utils/editorLogic';
 
 interface FinalShortStageProps {

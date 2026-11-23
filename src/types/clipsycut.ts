@@ -84,6 +84,8 @@ export interface ClipProject {
   platform: Platform;
   sourceUrl?: string;
   videoUrl: string;
+  /** Human-readable note about how the source media was resolved. */
+  mediaNote?: string;
   thumbnailUrl?: string;
   channelName: string;
   durationSec: number;

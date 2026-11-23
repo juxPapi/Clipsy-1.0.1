@@ -52,7 +52,7 @@
       const ratio = ratePerMin / Math.max(8, baseline);
 
       chrome.storage.local.set({
-        clipsyStatus: {
+        clipsycutStatus: {
           monitoring: true,
           platform,
           url: window.location.href,
@@ -76,9 +76,9 @@
           postSec: 15
         };
 
-        chrome.storage.local.get({ clipsySavedMoments: [] }, (res) => {
-          const updated = [clipPayload, ...res.clipsySavedMoments].slice(0, 30);
-          chrome.storage.local.set({ clipsySavedMoments: updated });
+        chrome.storage.local.get({ clipsycutSavedMoments: [] }, (res) => {
+          const updated = [clipPayload, ...res.clipsycutSavedMoments].slice(0, 30);
+          chrome.storage.local.set({ clipsycutSavedMoments: updated });
         });
 
         if (appBaseUrl) {
@@ -96,7 +96,7 @@
     monitoring = false;
     if (observer) observer.disconnect();
     if (sampleInterval) clearInterval(sampleInterval);
-    chrome.storage.local.set({ clipsyStatus: { monitoring: false } });
+    chrome.storage.local.set({ clipsycutStatus: { monitoring: false } });
   }
 
   chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
