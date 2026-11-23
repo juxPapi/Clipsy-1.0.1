@@ -1,6 +1,6 @@
 # ClipsyCut
 
-**ClipsyCut** is a full-stack stream clipping studio and 9:16 vertical video editor for **YouTube**, **Kick**, and **Twitch** creators. Paste a stream, VOD, or clip link (or upload a recording / connect the Manifest V3 Chrome extension) to detect viral moments, preview snippets, reframe Gameplay + Facecam into 9:16 vertical layouts, burn in timed captions & overlays, and export H.264 MP4 shorts at `1080p60`, `720p60`, or `720p30`.
+**ClipsyCut** is a full-stack stream clipping studio and 9:16 vertical video editor for **YouTube**, **Kick**, and **Twitch** creators. Changes are pushed to GitHub as `main` on `origin/main`. Paste a stream, VOD, or clip link (or upload a recording / connect the Manifest V3 Chrome extension) to detect viral moments, preview snippets, reframe Gameplay + Facecam into 9:16 vertical layouts, burn in timed captions & overlays, and export H.264 MP4 shorts at `1080p60`, `720p60`, or `720p30`.
 
 ---
 

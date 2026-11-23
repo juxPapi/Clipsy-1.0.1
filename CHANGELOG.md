@@ -7,19 +7,22 @@ All notable changes to **ClipsyCut** are documented in this file.
 ### Added
 
 - **Repair Media Recovery**: Existing projects with an expired stream link, missing local file, or empty `videoUrl` get a **Repair media** button in the snippet preview and editor. The new `POST /api/projects/:id/repair-media` endpoint re-resolves the real stream with `yt-dlp`, re-normalizes clip metadata, and updates the library project immediately.
-- **HLS-Safe Playback**: HLS playlists are proxied through the app origin, so imported YouTube/Twitch/Kick CDN links no longer need browser CORS. Both snippet preview and editor show loadable/error states and can recover.
+- **HLS-Safe Playback**: HLS playlists are proxied through the app origin, so imported YouTube/Twitch/Kick CDN links no longer need browser CORS. Both snippet preview and editor show loadable/error states, spinner states, and can recover.
 - **Multi-Segment Export**: `videoExporter.ts` now trims and concatenates every timeline segment instead of exporting only the first segment; FFmpeg timeout scales with clip length.
+- **Verification**: Added browser and unit-level checks for local MP4 playback, repaired stream HLS playback, non-overlapping caption generation, and multi-segment exports.
 
 ### Changed
 
+- **Real Stream Media Resolution Hardened**: `resolveStreamPlayback` now uses metadata-aware bounded downloads (`--download-sections`), remux/merge to browser-playable MP4, fast-start checking, longer scaled timeouts, cleanup of `.part`/`.ytdl` files, and never returns `.m3u8` as a browser playback URL. Project `durationSec`/moments are clamped to the actually downloaded media.
 - **Beginner-Friendly Captions Tab**: The editor CAPTIONS tab is now a clear 1-2-3 flow (generate → pick style → edit lines), with timestamps and an empty-state message when captions have not been generated.
 - **Renamed App**: The application is now **ClipsyCut** across the UI, extension metadata/archive name, exports, README, metadata.json, and package metadata.
 
 ### Fixed
 
 - **Caption Fallback Timing**: Local captions now cover the whole clip in non-overlapping windows; the old fallback repeated words due to off-by-two-segment slicing.
-- **Caption Generation**: Server caption schema requests 5-6 timestamped captions and sanitizes Gemini output bounds; no-key fallback is deterministic.
+- **Caption Generation**: Server caption schema requests 5-6 timestamped captions, sanitizes Gemini output bounds, and uses the shared local fallback builder.
 - **Export Runtime**: `videoExporter.ts` uses a longer, length-scaled FFmpeg timeout for long clips (previously 90s).
+- **Playback Error States**: Added visible errors for missing source video, failed `<video>` loads, and HLS/native failures; seek is set after `loadedmetadata` so metadata is honored.
 
 ### Added (0.5.0 and earlier details)
 
